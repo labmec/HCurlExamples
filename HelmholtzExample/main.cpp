@@ -75,10 +75,10 @@ int main(int argc, char **argv)
 #endif
 
     constexpr int dim{3};//physical dimension of the problem
-    constexpr int nDiv{3};//number of divisions of each direction (x, y) of the domain
-    constexpr int initialPOrder{1};//initial polynomial order
+    constexpr int nDiv{5};//number of divisions of each direction (x, y) of the domain
+    constexpr int initialPOrder{2};//initial polynomial order
     //this will set how many rounds of refinements will be performed
-    constexpr int nPRefinements{1};
+    constexpr int nPRefinements{3};
     //whether to perform adaptive or uniform p-refinement
     constexpr bool adaptiveP = false;
     //once the element with the maximum error is found, elements with errors bigger than
@@ -91,7 +91,7 @@ int main(int argc, char **argv)
     //which family of polynomials to use
     EOrthogonalFuncs orthogonalPolyFamily = EChebyshev;//EChebyshev = 0,EExpo = 1,ELegendre = 2 ,EJacobi = 3,EHermite = 4
     //whether to generate .vtk files
-    constexpr bool postProcess{true};
+    constexpr bool postProcess{false};
 
     const std::string executionInfo = [&](){
         std::string name("");
@@ -101,6 +101,8 @@ int main(int argc, char **argv)
         name.append(std::to_string(initialPOrder));
         name.append("_nPrefs");
         name.append(std::to_string(nPRefinements));
+        name.append("_nDivs");
+        name.append(std::to_string(nDiv));
         return name;
     }();
     const std::string plotfile = "solution"+executionInfo+".vtk";//where to print the vtk files
@@ -172,9 +174,9 @@ int main(int argc, char **argv)
         sol[1] = sin(2*M_PI*x)*sin(2*M_PI*z);
         sol[2] = sin(2*M_PI*x)*sin(2*M_PI*y);
         solDx.Resize(3,1);
-        solDx(0,0) = 2*M_PI*cos(2*M_PI*y)*sin(2*M_PI*x) - 2*M_PI*cos(2*M_PI*z)*sin(2*M_PI*x);
+        solDx(0,0) =  2*M_PI*cos(2*M_PI*y)*sin(2*M_PI*x) - 2*M_PI*cos(2*M_PI*z)*sin(2*M_PI*x);
         solDx(1,0) = -2*M_PI*cos(2*M_PI*x)*sin(2*M_PI*y) + 2*M_PI*cos(2*M_PI*z)*sin(2*M_PI*y);
-        solDx(2,0) = 2*M_PI*cos(2*M_PI*x)*sin(2*M_PI*z) - 2*M_PI*cos(2*M_PI*y)*sin(2*M_PI*z);
+        solDx(2,0) =  2*M_PI*cos(2*M_PI*x)*sin(2*M_PI*z) - 2*M_PI*cos(2*M_PI*y)*sin(2*M_PI*z);
     };
     switch(dim){
         case 3:
@@ -319,10 +321,11 @@ TPZCompMesh *CreateCompMesh(TPZGeoMesh *gmesh, const TPZVec<int> &matIds, const 
 
 
     auto forcingFunction3D = [](const TPZVec<REAL>& pt, TPZVec<STATE> &result){
+        static const auto aux = 8*M_PI*M_PI;
+
         const REAL &x = pt[0];
         const REAL &y = pt[1];
         const REAL &z = pt[2];
-        const auto aux = 8*M_PI*M_PI;
         result[0] = sin(2*M_PI*y)*sin(2*M_PI*z) + aux*sin(2*M_PI*y)*sin(2*M_PI*z);
         result[1] = sin(2*M_PI*x)*sin(2*M_PI*z) + aux*sin(2*M_PI*x)*sin(2*M_PI*z);
         result[2] = sin(2*M_PI*x)*sin(2*M_PI*y) + aux*sin(2*M_PI*x)*sin(2*M_PI*y);
