@@ -79,6 +79,8 @@ int main(int argc, char **argv)
     constexpr int initialPOrder{2};//initial polynomial order
     //this will set how many rounds of refinements will be performed
     constexpr int nPRefinements{3};
+    //whether to calculate the errors
+    constexpr bool calcErrors = false;
     //whether to perform adaptive or uniform p-refinement
     constexpr bool adaptiveP = false;
     //once the element with the maximum error is found, elements with errors bigger than
@@ -93,6 +95,10 @@ int main(int argc, char **argv)
     //whether to generate .vtk files
     constexpr bool postProcess{false};
 
+    if(!calcErrors && adaptiveP){
+        std::cout<<"Either calculate the errors or choose uniform p-refinement. Aborting...\n";
+        return -1;
+    }
     const std::string executionInfo = [&](){
         std::string name("");
         if(adaptiveP) name.append("_adapP");
@@ -165,33 +171,34 @@ int main(int argc, char **argv)
     TPZStepSolver<STATE> step;
     step.SetDirect(ELDLt);
     an.SetSolver(step);
-
-    //setting reference solution
-    auto exactSolution3D = [] (const TPZVec<REAL> &pt, TPZVec<STATE> &sol, TPZFMatrix<STATE> &solDx){
-        const auto & x = pt[0], y = pt[1], z = pt[2];
-        sol.Resize(3);
-        sol[0] = sin(2*M_PI*y)*sin(2*M_PI*z);
-        sol[1] = sin(2*M_PI*x)*sin(2*M_PI*z);
-        sol[2] = sin(2*M_PI*x)*sin(2*M_PI*y);
-        solDx.Resize(3,1);
-        solDx(0,0) =  2*M_PI*cos(2*M_PI*y)*sin(2*M_PI*x) - 2*M_PI*cos(2*M_PI*z)*sin(2*M_PI*x);
-        solDx(1,0) = -2*M_PI*cos(2*M_PI*x)*sin(2*M_PI*y) + 2*M_PI*cos(2*M_PI*z)*sin(2*M_PI*y);
-        solDx(2,0) =  2*M_PI*cos(2*M_PI*x)*sin(2*M_PI*z) - 2*M_PI*cos(2*M_PI*y)*sin(2*M_PI*z);
-    };
-    switch(dim){
-        case 3:
-            an.SetExact(exactSolution3D);
-            break;
-        default:
-            DebugStop();
+    if(calcErrors){
+        //setting reference solution
+        auto exactSolution3D = [] (const TPZVec<REAL> &pt, TPZVec<STATE> &sol, TPZFMatrix<STATE> &solDx){
+            const auto & x = pt[0], y = pt[1], z = pt[2];
+            sol.Resize(3);
+            sol[0] = sin(2*M_PI*y)*sin(2*M_PI*z);
+            sol[1] = sin(2*M_PI*x)*sin(2*M_PI*z);
+            sol[2] = sin(2*M_PI*x)*sin(2*M_PI*y);
+            solDx.Resize(3,1);
+            solDx(0,0) =  2*M_PI*cos(2*M_PI*y)*sin(2*M_PI*x) - 2*M_PI*cos(2*M_PI*z)*sin(2*M_PI*x);
+            solDx(1,0) = -2*M_PI*cos(2*M_PI*x)*sin(2*M_PI*y) + 2*M_PI*cos(2*M_PI*z)*sin(2*M_PI*y);
+            solDx(2,0) =  2*M_PI*cos(2*M_PI*x)*sin(2*M_PI*z) - 2*M_PI*cos(2*M_PI*y)*sin(2*M_PI*z);
+        };
+        switch(dim){
+            case 3:
+                an.SetExact(exactSolution3D);
+                break;
+            default:
+                DebugStop();
+        }
+        an.SetThreadsForError(numthreads);
     }
-    an.SetThreadsForError(numthreads);
 
     //setting variables for post processing
     TPZStack<std::string> scalnames, vecnames;
     vecnames.Push("E");//print the state variable
     vecnames.Push("curlE");//print the curl of the state variable
-    scalnames.Push("Error");//print the error of each element
+    if(calcErrors)  scalnames.Push("Error");//print the error of each element
     scalnames.Push("MaterialId");//print the material identifier of each element
     //resize the matrix that will store the error for each element
     cMesh->ElementSolution().Resize(cMesh->NElements(),3);
@@ -214,12 +221,15 @@ int main(int argc, char **argv)
         std::cout<<"\tAssembling matrix with NDoF = "<<an.StructMatrix()->EquationFilter().NActiveEquations()<<"."<<std::endl;
         an.Assemble(); //Assembles the global stiffness matrix (and load vector)
         std::cout<<"\tAssemble finished."<<std::endl;
+        std::cout<<"\tSolving system..."<<std::endl;
         an.Solve();
-
-        std::cout<<"\tCalculating errors..."<<std::endl;
-        TPZVec<REAL> errorVec(3,0);
-        an.PostProcessError(errorVec,true);
-        std::cout<<"############"<<std::endl;
+        std::cout<<"\tSolving finished."<<std::endl;
+        if(calcErrors){
+            std::cout<<"\tCalculating errors..."<<std::endl;
+            TPZVec<REAL> errorVec(3,0);
+            an.PostProcessError(errorVec,true);
+            std::cout<<"############"<<std::endl;
+        }
         if(postProcess){
             std::cout<<"\tPost processing..."<<std::endl;
             an.DefineGraphMesh(dim, scalnames, vecnames, plotfile);
@@ -290,11 +300,12 @@ TPZGeoMesh *CreateGeoMesh3D(int ndiv, MElementType meshType, TPZVec<int> &matIds
     //Creating geometric mesh, nodes and elements.
     //Including nodes and elements in the mesh object:
     //create boundary elements
+    constexpr int minX{0},minY{0},minZ{0};
     constexpr int maxX{1},maxY{1},maxZ{1};
     constexpr int matIdDomain{1};
     constexpr int matIdBoundary{2};
 
-    TPZGenGrid3D genGrid3D(maxX,maxY,maxZ,ndiv,ndiv,ndiv,meshType);
+    TPZGenGrid3D genGrid3D(minX,minY,minZ,maxX,maxY,maxZ,ndiv,ndiv,ndiv,meshType);
     genGrid3D.BuildVolumetricElements(matIdDomain);
     TPZGeoMesh *gmesh = genGrid3D.BuildBoundaryElements(matIdBoundary,matIdBoundary,matIdBoundary,matIdBoundary,matIdBoundary,matIdBoundary);
     gmesh->BuildConnectivity();
