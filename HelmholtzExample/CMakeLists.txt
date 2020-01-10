@@ -1,5 +1,5 @@
 
-set(HelmholtzExample_SRCS main.cpp)
+set(HelmholtzExample_SRCS Helmholtz.cpp)
 
 add_executable(HelmholtzExample ${HelmholtzExample_SRCS} )
 

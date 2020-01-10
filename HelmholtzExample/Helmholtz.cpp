@@ -24,6 +24,7 @@
 #include "Mesh/pzcondensedcompel.h"
 #include <string>
 #include <Post/TPZVTKGeoMesh.h>
+#include <Refine/TPZRefPatternDataBase.h>
 
 enum EOrthogonalFuncs{
     EChebyshev = 0,EExpo = 1,ELegendre = 2 ,EJacobi = 3,EHermite = 4
@@ -33,11 +34,19 @@ enum EOrthogonalFuncs{
  * @brief Routine from creating the geometric mesh of the domain. It is a square with nodes
  * (0,0), (1,0), (1,1), (0,1).
  * @param dim dimension of the problem
- * @param ndiv number of divisions on the x direction
+ * @param ndiv number of divisions on the x and y directions
  * @param meshType defines with elements will be created (triangular, square, trapezoidal)
- * @param matIds store the material identifiers
+ * @param matIds stores the material identifiers
  */
 static TPZGeoMesh *CreateGeoMesh2D(int ndiv, MElementType meshType, TPZVec<int> &matIds);
+/**
+ * @brief Routine from creating the geometric mesh of the domain. It is a cube with nodes
+ * (0,0,0), (1,0,0), (0,1,0), (1,1,0),(0,0,1), (1,0,1), (0,1,1), (1,1,1).
+ * @param dim dimension of the problem
+ * @param ndiv number of divisions on the x, y and z directions
+ * @param meshType defines with elements will be created (tetrahedral, hexahedral and prismatic)
+ * @param matIds stores the material identifiers
+ */
 static TPZGeoMesh *CreateGeoMesh3D(int ndiv, MElementType meshType, TPZVec<int> &matIds);
 
 /**
@@ -73,14 +82,18 @@ int main(int argc, char **argv)
     mkl_set_dynamic(0); // disable automatic adjustment of the number of threads
     mkl_set_num_threads(numthreads);
 #endif
-
-    constexpr int dim{3};//physical dimension of the problem
-    constexpr int nDiv{5};//number of divisions of each direction (x, y) of the domain
-    constexpr int initialPOrder{2};//initial polynomial order
-    //this will set how many rounds of refinements will be performed
-    constexpr int nPRefinements{3};
+    //physical dimension of the problem
+    constexpr int dim{3};
+    //number of divisions of each direction (x, y or x,y,z) of the domain
+    constexpr int nDiv{2};
+    //initial polynomial order
+    constexpr int initialPOrder{2};
+    //this will set how many rounds of p-refinements will be performed
+    constexpr int nPRefinements{0};
+    //this will set how many rounds of h-refinements will be performed
+    constexpr int nHRefinements{5};
     //whether to calculate the errors
-    constexpr bool calcErrors = false;
+    constexpr bool calcErrors = true;
     //whether to perform adaptive or uniform p-refinement
     constexpr bool adaptiveP = false;
     //once the element with the maximum error is found, elements with errors bigger than
@@ -94,7 +107,7 @@ int main(int argc, char **argv)
     EOrthogonalFuncs orthogonalPolyFamily = EChebyshev;//EChebyshev = 0,EExpo = 1,ELegendre = 2 ,EJacobi = 3,EHermite = 4
     //whether to generate .vtk files
     constexpr bool postProcess{false};
-
+    constexpr MElementType elType{ETetraedro};
     if(!calcErrors && adaptiveP){
         std::cout<<"Either calculate the errors or choose uniform p-refinement. Aborting...\n";
         return -1;
@@ -114,137 +127,146 @@ int main(int argc, char **argv)
     const std::string plotfile = "solution"+executionInfo+".vtk";//where to print the vtk files
     constexpr int postProcessResolution{2};
 
-    /** In NeoPZ, the TPZMaterial classes are used to implement the weak statement of the differential equation,
-     * along with setting up the constitutive parameters of each region of the domain. See the method CreateCompMesh
-     * in this file for an example.
-     * The material ids are identifiers used in NeoPZ to identify different domain's regions/properties.
-     */
-    TPZVec<int> matIdVec;
-    TPZGeoMesh *gMesh = [&]() -> TPZGeoMesh *{
-        switch(dim){
-            case 2: return CreateGeoMesh2D(nDiv,ETriangle,matIdVec);
-                break;
-            case 3: return CreateGeoMesh3D(nDiv,ETetraedro,matIdVec);
-                break;
-            default:
-                DebugStop();
-        }
-        return nullptr;
-    }();
-    {
-        std::string geoMeshName("geoMesh"+executionInfo);
-        std::ofstream geoMeshVtk(geoMeshName+".vtk");
-        TPZVTKGeoMesh::PrintGMeshVTK(gMesh, geoMeshVtk);
-        std::ofstream geoMeshTxt(geoMeshName+".txt");
-        gMesh->Print(geoMeshTxt);
-    }
-    //creates computational mesh
-    TPZCompMesh *cMesh = CreateCompMesh(gMesh,matIdVec,initialPOrder,orthogonalPolyFamily);
-    {
-        std::string compMeshName("compMesh"+executionInfo);
-        std::ofstream compMeshTxt(compMeshName+".txt");
-        cMesh->Print(compMeshTxt);
-    }
-    //Setting up the analysis object
-    constexpr bool optimizeBandwidth{true};
-    TPZAnalysis an(cMesh, optimizeBandwidth); //Creates the object that will manage the analysis of the problem
-    {
-        //The TPZStructMatrix classes provide an interface between the linear algebra aspects of the library and
-        //the Finite Element ones. Their specification (TPZSymetricSpStructMatrix, TPZSkylineStructMatrix, etc) are
-        //also used to define the storage format for the matrices. In this example, the first one is the
-        //CSR sparse matrix storage, and the second one the skyline, both in their symmetric versions.
-
-
-
-        //I highly recommend running this program using the MKL libraries, the solving process will be
-        //significantly faster.
-#ifdef USING_MKL
-        TPZSymetricSpStructMatrix matskl(cMesh);
-#else
-        TPZSkylineStructMatrix matskl(cMesh);
-#endif
-        matskl.SetNumThreads(numthreads);
-        an.SetStructuralMatrix(matskl);
-    }
-
-    //setting solver to be used. ELDLt will default to Pardiso if USING_MKL is enabled.
-    TPZStepSolver<STATE> step;
-    step.SetDirect(ELDLt);
-    an.SetSolver(step);
-    if(calcErrors){
-        //setting reference solution
-        auto exactSolution3D = [] (const TPZVec<REAL> &pt, TPZVec<STATE> &sol, TPZFMatrix<STATE> &solDx){
-            const auto & x = pt[0], y = pt[1], z = pt[2];
-            sol.Resize(3);
-            sol[0] = sin(2*M_PI*y)*sin(2*M_PI*z);
-            sol[1] = sin(2*M_PI*x)*sin(2*M_PI*z);
-            sol[2] = sin(2*M_PI*x)*sin(2*M_PI*y);
-            solDx.Resize(3,1);
-            solDx(0,0) =  2*M_PI*cos(2*M_PI*y)*sin(2*M_PI*x) - 2*M_PI*cos(2*M_PI*z)*sin(2*M_PI*x);
-            solDx(1,0) = -2*M_PI*cos(2*M_PI*x)*sin(2*M_PI*y) + 2*M_PI*cos(2*M_PI*z)*sin(2*M_PI*y);
-            solDx(2,0) =  2*M_PI*cos(2*M_PI*x)*sin(2*M_PI*z) - 2*M_PI*cos(2*M_PI*y)*sin(2*M_PI*z);
-        };
-        switch(dim){
-            case 3:
-                an.SetExact(exactSolution3D);
-                break;
-            default:
-                DebugStop();
-        }
-        an.SetThreadsForError(numthreads);
-    }
-
-    //setting variables for post processing
-    TPZStack<std::string> scalnames, vecnames;
-    vecnames.Push("E");//print the state variable
-    vecnames.Push("curlE");//print the curl of the state variable
-    if(calcErrors)  scalnames.Push("Error");//print the error of each element
-    scalnames.Push("MaterialId");//print the material identifier of each element
-    //resize the matrix that will store the error for each element
-    cMesh->ElementSolution().Resize(cMesh->NElements(),3);
-    TPZVec<int64_t> activeEquations;
-    for(auto it = 0 ; it < nPRefinements + 1; it++){
+    for(auto itH = 0 ; itH < nHRefinements + 1; itH++){
         std::cout<<"============================"<<std::endl;
-        std::cout<<"\tIteration "<<it+1<<" out of "<<nPRefinements + 1<<std::endl;
-        if(condense) TPZCompMeshTools::CreatedCondensedElements(cMesh,false,false);
-        if(filterBoundaryEqs){
-            int64_t neqOriginal = -1, neqReduced = -1;
-            activeEquations.Resize(0);
-            FilterBoundaryEquations(cMesh,activeEquations, neqReduced, neqOriginal);
-            an.StructMatrix()->EquationFilter().Reset();
-            an.StructMatrix()->EquationFilter().SetNumEq(cMesh->NEquations());
-            an.StructMatrix()->EquationFilter().SetActiveEquations(activeEquations);
-        }else{
-            an.StructMatrix()->EquationFilter().SetNumEq(cMesh->NEquations());
+        std::cout<<"\tIteration (h) "<<itH+1<<" out of "<<nHRefinements + 1<<std::endl;
+        /** In NeoPZ, the TPZMaterial classes are used to implement the weak statement of the differential equation,
+         * along with setting up the constitutive parameters of each region of the domain. See the method CreateCompMesh
+         * in this file for an example.
+         * The material ids are identifiers used in NeoPZ to identify different domain's regions/properties.
+         */
+        TPZVec<int> matIdVec;
+        TPZGeoMesh *gMesh = [&]() -> TPZGeoMesh *{
+            switch(dim){
+                case 2: return CreateGeoMesh2D(nDiv * (itH + 1),ETriangle,matIdVec);
+                    break;
+                case 3: return CreateGeoMesh3D(nDiv * (itH + 1),ETetraedro,matIdVec);
+                    break;
+                default:
+                    DebugStop();
+            }
+            return nullptr;
+        }();
+        std::cout<<"\tNumber of elements: "<<gMesh->NElements()<<std::endl;
+        //prints mesh
+        {
+            std::string geoMeshName("geoMesh"+executionInfo);
+            if(nHRefinements) geoMeshName += "_hdiv_"+std::to_string(itH);
+            std::ofstream geoMeshVtk(geoMeshName+".vtk");
+            TPZVTKGeoMesh::PrintGMeshVTK(gMesh, geoMeshVtk);
+            std::ofstream geoMeshTxt(geoMeshName+".txt");
+            gMesh->Print(geoMeshTxt);
         }
-        an.SetCompMesh(cMesh,optimizeBandwidth);
-        std::cout<<"\tAssembling matrix with NDoF = "<<an.StructMatrix()->EquationFilter().NActiveEquations()<<"."<<std::endl;
-        an.Assemble(); //Assembles the global stiffness matrix (and load vector)
-        std::cout<<"\tAssemble finished."<<std::endl;
-        std::cout<<"\tSolving system..."<<std::endl;
-        an.Solve();
-        std::cout<<"\tSolving finished."<<std::endl;
+
+        //creates computational mesh
+        TPZCompMesh *cMesh = CreateCompMesh(gMesh,matIdVec,initialPOrder,orthogonalPolyFamily);
+
+        {
+            std::string compMeshName("compMesh"+executionInfo);
+            std::ofstream compMeshTxt(compMeshName+".txt");
+            cMesh->Print(compMeshTxt);
+        }
+        //Setting up the analysis object
+        constexpr bool optimizeBandwidth{true};
+        TPZAnalysis an(cMesh, optimizeBandwidth); //Creates the object that will manage the analysis of the problem
+        {
+            //The TPZStructMatrix classes provide an interface between the linear algebra aspects of the library and
+            //the Finite Element ones. Their specification (TPZSymetricSpStructMatrix, TPZSkylineStructMatrix, etc) are
+            //also used to define the storage format for the matrices. In this example, the first one is the
+            //CSR sparse matrix storage, and the second one the skyline, both in their symmetric versions.
+
+
+
+            //I highly recommend running this program using the MKL libraries, the solving process will be
+            //significantly faster.
+#ifdef USING_MKL
+            TPZSymetricSpStructMatrix matskl(cMesh);
+#else
+            TPZSkylineStructMatrix matskl(cMesh);
+#endif
+            matskl.SetNumThreads(numthreads);
+            an.SetStructuralMatrix(matskl);
+        }
+
+        //setting solver to be used. ELDLt will default to Pardiso if USING_MKL is enabled.
+        TPZStepSolver<STATE> step;
+        step.SetDirect(ELDLt);
+        an.SetSolver(step);
         if(calcErrors){
-            std::cout<<"\tCalculating errors..."<<std::endl;
-            TPZVec<REAL> errorVec(3,0);
-            an.PostProcessError(errorVec,true);
-            std::cout<<"############"<<std::endl;
+            //setting reference solution
+            auto exactSolution3D = [] (const TPZVec<REAL> &pt, TPZVec<STATE> &sol, TPZFMatrix<STATE> &solDx){
+                const auto & x = pt[0], y = pt[1], z = pt[2];
+                sol.Resize(3);
+                sol[0] = sin(2*M_PI*y)*sin(2*M_PI*z);
+                sol[1] = sin(2*M_PI*x)*sin(2*M_PI*z);
+                sol[2] = sin(2*M_PI*x)*sin(2*M_PI*y);
+                solDx.Resize(3,1);
+                solDx(0,0) =  2*M_PI*cos(2*M_PI*y)*sin(2*M_PI*x) - 2*M_PI*cos(2*M_PI*z)*sin(2*M_PI*x);
+                solDx(1,0) = -2*M_PI*cos(2*M_PI*x)*sin(2*M_PI*y) + 2*M_PI*cos(2*M_PI*z)*sin(2*M_PI*y);
+                solDx(2,0) =  2*M_PI*cos(2*M_PI*x)*sin(2*M_PI*z) - 2*M_PI*cos(2*M_PI*y)*sin(2*M_PI*z);
+            };
+            switch(dim){
+                case 3:
+                    an.SetExact(exactSolution3D);
+                    break;
+                default:
+                    DebugStop();
+            }
+            an.SetThreadsForError(numthreads);
         }
-        if(postProcess){
-            std::cout<<"\tPost processing..."<<std::endl;
-            an.DefineGraphMesh(dim, scalnames, vecnames, plotfile);
-            an.SetStep(it);
-            an.PostProcess(postProcessResolution);
-            std::cout<<"\tPost processing finished."<<std::endl;
+
+        //setting variables for post processing
+        TPZStack<std::string> scalnames, vecnames;
+        vecnames.Push("E");//print the state variable
+        vecnames.Push("curlE");//print the curl of the state variable
+        if(calcErrors)  scalnames.Push("Error");//print the error of each element
+        scalnames.Push("MaterialId");//print the material identifier of each element
+        //resize the matrix that will store the error for each element
+        cMesh->ElementSolution().Resize(cMesh->NElements(),3);
+        TPZVec<int64_t> activeEquations;
+        for(auto itP = 0 ; itP < nPRefinements + 1; itP++){
+            std::cout<<"\t============================"<<std::endl;
+            std::cout<<"\t\tIteration (p) "<<itP+1<<" out of "<<nPRefinements + 1<<std::endl;
+            if(condense) TPZCompMeshTools::CreatedCondensedElements(cMesh,false,false);
+            if(filterBoundaryEqs){
+                int64_t neqOriginal = -1, neqReduced = -1;
+                activeEquations.Resize(0);
+                FilterBoundaryEquations(cMesh,activeEquations, neqReduced, neqOriginal);
+                an.StructMatrix()->EquationFilter().Reset();
+                an.StructMatrix()->EquationFilter().SetNumEq(cMesh->NEquations());
+                an.StructMatrix()->EquationFilter().SetActiveEquations(activeEquations);
+            }else{
+                an.StructMatrix()->EquationFilter().SetNumEq(cMesh->NEquations());
+            }
+            an.SetCompMesh(cMesh,optimizeBandwidth);
+            std::cout<<"\tAssembling matrix with NDoF = "<<an.StructMatrix()->EquationFilter().NActiveEquations()<<"."<<std::endl;
+            an.Assemble(); //Assembles the global stiffness matrix (and load vector)
+            std::cout<<"\tAssemble finished."<<std::endl;
+            std::cout<<"\tSolving system..."<<std::endl;
+            an.Solve();
+            std::cout<<"\tSolving finished."<<std::endl;
+            if(calcErrors){
+                std::cout<<"\t\tCalculating errors..."<<std::endl;
+                TPZVec<REAL> errorVec(3,0);
+                an.PostProcessError(errorVec,true);
+                std::cout<<"############"<<std::endl;
+            }
+            if(postProcess){
+                std::cout<<"\t\tPost processing..."<<std::endl;
+                an.DefineGraphMesh(dim, scalnames, vecnames, plotfile);
+                an.SetStep(itP);
+                an.PostProcess(postProcessResolution);
+                std::cout<<"\t\tPost processing finished."<<std::endl;
+            }
+            if(itP < nPRefinements){
+                if(adaptiveP)   PerformAdapativePRefinement(cMesh, an, errorPercentage);
+                else PerformUniformPRefinement(cMesh,an);
+            }
+            if(condense) TPZCompMeshTools::UnCondensedElements(cMesh);
         }
-        if(it < nPRefinements){
-            if(adaptiveP)   PerformAdapativePRefinement(cMesh, an, errorPercentage);
-            else PerformUniformPRefinement(cMesh,an);
-        }
-        if(condense) TPZCompMeshTools::UnCondensedElements(cMesh);
+        delete cMesh;
+        delete gMesh;
     }
-    delete cMesh;
-    delete gMesh;
     return 0;
 }
 
