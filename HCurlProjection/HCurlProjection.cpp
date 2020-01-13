@@ -87,11 +87,11 @@ int main(int argc, char **argv)
     //number of divisions of each direction (x, y or x,y,z) of the domain
     constexpr int nDiv{2};
     //initial polynomial order
-    constexpr int initialPOrder{2};
+    constexpr int initialPOrder{4};
     //this will set how many rounds of p-refinements will be performed
     constexpr int nPRefinements{0};
     //this will set how many rounds of h-refinements will be performed
-    constexpr int nHRefinements{6};
+    constexpr int nHRefinements{0};
     //whether to calculate the errors
     constexpr bool calcErrors = true;
     //whether to perform adaptive or uniform p-refinement
@@ -106,10 +106,14 @@ int main(int argc, char **argv)
     //which family of polynomials to use
     EOrthogonalFuncs orthogonalPolyFamily = EChebyshev;//EChebyshev = 0,EExpo = 1,ELegendre = 2 ,EJacobi = 3,EHermite = 4
     //whether to generate .vtk files
-    constexpr bool postProcess{false};
+    constexpr bool postProcess{true};
     //post-processing resolution
-    constexpr int postProcessResolution{2};
+    constexpr int postProcessResolution{0};
+
     constexpr MElementType elType{ETetraedro};
+
+    //Setting up the analysis object
+    constexpr bool optimizeBandwidth{false};
     if(!calcErrors && adaptiveP){
         std::cout<<"Either calculate the errors or choose uniform p-refinement. Aborting...\n";
         return -1;
@@ -127,46 +131,80 @@ int main(int argc, char **argv)
         return name;
     }();
 
-    for(auto itH = 0 ; itH < nHRefinements + 1; itH++){
-        std::cout<<"============================"<<std::endl;
-        std::cout<<"\tIteration (h) "<<itH+1<<" out of "<<nHRefinements + 1<<std::endl;
+    for(auto itH = 0 ; itH < nHRefinements + 1; itH++) {
+        std::cout << "============================" << std::endl;
+        std::cout << "\tIteration (h) " << itH + 1 << " out of " << nHRefinements + 1 << std::endl;
         /** In NeoPZ, the TPZMaterial classes are used to implement the weak statement of the differential equation,
          * along with setting up the constitutive parameters of each region of the domain. See the method CreateCompMesh
          * in this file for an example.
          * The material ids are identifiers used in NeoPZ to identify different domain's regions/properties.
          */
         TPZVec<int> matIdVec;
-        TPZGeoMesh *gMesh = [&]() -> TPZGeoMesh *{
-            switch(dim){
-                case 2: return CreateGeoMesh2D(nDiv * (itH + 1),ETriangle,matIdVec);
+        TPZGeoMesh *gMesh = [&]() -> TPZGeoMesh * {
+            switch (dim) {
+                case 2:
+                    return CreateGeoMesh2D(nDiv * (itH + 1), ETriangle, matIdVec);
                     break;
-                case 3: return CreateGeoMesh3D(nDiv * (itH + 1),ETetraedro,matIdVec);
+                case 3:
+                    return CreateGeoMesh3D(nDiv * (itH + 1), ETetraedro, matIdVec);
                     break;
                 default:
                     DebugStop();
             }
             return nullptr;
         }();
-        std::cout<<"\tNumber of elements: "<<gMesh->NElements()<<std::endl;
+        std::cout << "\tNumber of elements: " << gMesh->NElements() << std::endl;
         //prints mesh
         {
-            std::string geoMeshName("geoMesh"+executionInfo);
-            if(nHRefinements) geoMeshName += "_hdiv_"+std::to_string(itH);
-            std::ofstream geoMeshVtk(geoMeshName+".vtk");
+            std::string geoMeshName("geoMesh" + executionInfo);
+            if (nHRefinements) geoMeshName += "_hdiv_" + std::to_string(itH);
+            std::ofstream geoMeshVtk(geoMeshName + ".vtk");
             TPZVTKGeoMesh::PrintGMeshVTK(gMesh, geoMeshVtk);
-            std::ofstream geoMeshTxt(geoMeshName+".txt");
+            std::ofstream geoMeshTxt(geoMeshName + ".txt");
             gMesh->Print(geoMeshTxt);
         }
 
         //creates computational mesh
-        TPZCompMesh *cMesh = CreateCompMesh(gMesh,matIdVec,initialPOrder,orthogonalPolyFamily);
+        TPZCompMesh *cMesh = CreateCompMesh(gMesh, matIdVec, initialPOrder, orthogonalPolyFamily);
+
+        {//@TODOFran: REMOVER
+        delete cMesh->Element(0);
+        delete cMesh->Element(1);
+        delete cMesh->Element(2);
+//        delete cMesh->Element(3);
+//        delete cMesh->Element(4);
+        delete cMesh->Element(5);
+        delete cMesh->Element(6);
+        delete cMesh->Element(7);
+        delete cMesh->Element(8);
+        delete cMesh->Element(9);
+
+        TPZVec<int64_t> connectIndexes(3,-1);
+        connectIndexes[0] = 5;
+        connectIndexes[1] = 24;
+        connectIndexes[2] = 15;
+//        connectIndexes[3] = 34;
+
+        for(auto con : connectIndexes){
+            auto newIndex = cMesh->AllocateNewConnect(cMesh->ConnectVec()[con]);
+            int oldIndex = -1;
+            for(auto icon = 0; icon < cMesh->Element(4)->NConnects(); icon++){
+                if(cMesh->Element(4)->ConnectIndex(icon) == con) oldIndex = icon;
+            }
+            cMesh->Element(4)->SetConnectIndex(oldIndex,newIndex);
+        }
+
+
+        cMesh->CleanUpUnconnectedNodes();
+        cMesh->ExpandSolution();
+
+        }
+
         {
             std::string compMeshName("compMesh"+executionInfo);
             std::ofstream compMeshTxt(compMeshName+".txt");
             cMesh->Print(compMeshTxt);
         }
-        //Setting up the analysis object
-        constexpr bool optimizeBandwidth{true};
         TPZAnalysis an(cMesh, optimizeBandwidth); //Creates the object that will manage the analysis of the problem
         {
             //The TPZStructMatrix classes provide an interface between the linear algebra aspects of the library and
@@ -241,6 +279,11 @@ int main(int argc, char **argv)
             std::cout<<"\tAssembling matrix with NDoF = "<<an.StructMatrix()->EquationFilter().NActiveEquations()<<"."<<std::endl;
             an.Assemble(); //Assembles the global stiffness matrix (and load vector)
             std::cout<<"\tAssemble finished."<<std::endl;
+            {//@TODOFran: REMOVER
+                const std::string matFileName = "matrix"+executionInfo+".nb";//where to print the matrix files
+                std::ofstream matFile(matFileName);
+                an.Solver().Matrix()->Print("will_be_ignored",matFile,EMathematicaInput);
+            }
             std::cout<<"\tSolving system..."<<std::endl;
             an.Solve();
             std::cout<<"\tSolving finished."<<std::endl;
@@ -299,12 +342,8 @@ TPZGeoMesh *CreateGeoMesh2D(int ndiv, MElementType meshType, TPZVec<int> &matIds
         default:
             DebugStop();
     }
-    constexpr int matIdDomain = 1, matIdBoundary = 2;
+    constexpr int matIdDomain = 1;
     gengrid.Read(gmesh, matIdDomain);
-    gengrid.SetBC(gmesh, 4, matIdBoundary);
-    gengrid.SetBC(gmesh, 5, matIdBoundary);
-    gengrid.SetBC(gmesh, 6, matIdBoundary);
-    gengrid.SetBC(gmesh, 7, matIdBoundary);
 
     gmesh->BuildConnectivity();
 
@@ -312,9 +351,8 @@ TPZGeoMesh *CreateGeoMesh2D(int ndiv, MElementType meshType, TPZVec<int> &matIds
         TPZCheckGeom check(gmesh);
         check.CheckUniqueId();
     }
-    matIds.Resize(2);
+    matIds.Resize(1);
     matIds[0] = matIdDomain;
-    matIds[1] = matIdBoundary;
     return gmesh;
 }//CreateGeoMesh2D
 
@@ -325,16 +363,15 @@ TPZGeoMesh *CreateGeoMesh3D(int ndiv, MElementType meshType, TPZVec<int> &matIds
     constexpr int minX{0},minY{0},minZ{0};
     constexpr int maxX{1},maxY{1},maxZ{1};
     constexpr int matIdDomain{1};
-    constexpr int matIdBoundary{2};
 
-    TPZGenGrid3D genGrid3D(minX,minY,minZ,maxX,maxY,maxZ,ndiv,ndiv,ndiv,meshType);
-    genGrid3D.BuildVolumetricElements(matIdDomain);
-    TPZGeoMesh *gmesh = genGrid3D.BuildBoundaryElements(matIdBoundary,matIdBoundary,matIdBoundary,matIdBoundary,matIdBoundary,matIdBoundary);
+//    TPZGenGrid3D genGrid3D(minX,minY,minZ,maxX,maxY,maxZ,ndiv,ndiv,ndiv,meshType);
+    //@TODOFran: REMOVER
+    TPZGenGrid3D genGrid3D(minX,minY,minZ,maxX,maxY,maxZ,1,ndiv,1,meshType);
+    TPZGeoMesh *gmesh = genGrid3D.BuildVolumetricElements(matIdDomain);
     gmesh->BuildConnectivity();
 
-    matIds.Resize(2);
+    matIds.Resize(1);
     matIds[0] = matIdDomain;
-    matIds[1] = matIdBoundary;
     return gmesh;
 }//CreateGeoMesh3D
 
@@ -375,14 +412,6 @@ TPZCompMesh *CreateCompMesh(TPZGeoMesh *gmesh, const TPZVec<int> &matIds, const 
 
     //Inserting volumetric materials objects
     cmesh->InsertMaterialObject(mat);
-
-    //Boundary conditions
-    constexpr int dirichlet{0};
-    constexpr int neumann{1};
-
-    const int &matIdBc1 = matIds[1];
-    auto bc1 = mat->CreateBC(mat, matIdBc1, dirichlet, TPZFNMatrix<1,STATE>(1,1,0),TPZFNMatrix<1,STATE>(1,1,0));
-    cmesh->InsertMaterialObject(bc1);
 
     cmesh->SetAllCreateFunctionsHCurl();//set Hcurl approximation space
     cmesh->AutoBuild();
