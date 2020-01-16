@@ -72,6 +72,18 @@ static void PerformUniformPRefinement(TPZCompMesh *cmesh, TPZAnalysis &an);
 static void FilterBoundaryEquations(TPZCompMesh *cmesh, TPZVec<int64_t> &activeEquations, int64_t &neq,
                              int64_t &neqOriginal);
 
+void ExactSolution3D(const TPZVec<REAL> &pt, TPZVec<STATE> &sol, TPZFMatrix<STATE> &solDx){
+    const auto & x = pt[0], y = pt[1], z = pt[2];
+    sol.Resize(3);
+    sol[0] = sin(2*M_PI*y)*sin(2*M_PI*z);
+    sol[1] = sin(2*M_PI*x)*sin(2*M_PI*z);
+    sol[2] = sin(2*M_PI*x)*sin(2*M_PI*y);
+    solDx.Resize(3,1);
+    solDx(0,0) =  2*M_PI*cos(2*M_PI*y)*sin(2*M_PI*x) - 2*M_PI*cos(2*M_PI*z)*sin(2*M_PI*x);
+    solDx(1,0) = -2*M_PI*cos(2*M_PI*x)*sin(2*M_PI*y) + 2*M_PI*cos(2*M_PI*z)*sin(2*M_PI*y);
+    solDx(2,0) =  2*M_PI*cos(2*M_PI*x)*sin(2*M_PI*z) - 2*M_PI*cos(2*M_PI*y)*sin(2*M_PI*z);
+};
+
 int main(int argc, char **argv)
 {
 #ifdef LOG4CXX
@@ -85,13 +97,13 @@ int main(int argc, char **argv)
     //physical dimension of the problem
     constexpr int dim{3};
     //number of divisions of each direction (x, y or x,y,z) of the domain
-    constexpr int nDiv{2};
+    constexpr int nDiv{4};
     //initial polynomial order
-    constexpr int initialPOrder{2};
+    constexpr int initialPOrder{1};
     //this will set how many rounds of p-refinements will be performed
     constexpr int nPRefinements{0};
     //this will set how many rounds of h-refinements will be performed
-    constexpr int nHRefinements{5};
+    constexpr int nHRefinements{0};
     //whether to calculate the errors
     constexpr bool calcErrors = true;
     //whether to perform adaptive or uniform p-refinement
@@ -106,7 +118,8 @@ int main(int argc, char **argv)
     //which family of polynomials to use
     EOrthogonalFuncs orthogonalPolyFamily = EChebyshev;//EChebyshev = 0,EExpo = 1,ELegendre = 2 ,EJacobi = 3,EHermite = 4
     //whether to generate .vtk files
-    constexpr bool postProcess{false};
+    constexpr bool postProcess{true};
+    constexpr int postProcessResolution{2};
     constexpr MElementType elType{ETetraedro};
     if(!calcErrors && adaptiveP){
         std::cout<<"Either calculate the errors or choose uniform p-refinement. Aborting...\n";
@@ -125,7 +138,6 @@ int main(int argc, char **argv)
         return name;
     }();
     const std::string plotfile = "solution"+executionInfo+".vtk";//where to print the vtk files
-    constexpr int postProcessResolution{2};
 
     for(auto itH = 0 ; itH < nHRefinements + 1; itH++){
         std::cout<<"============================"<<std::endl;
@@ -194,20 +206,9 @@ int main(int argc, char **argv)
         an.SetSolver(step);
         if(calcErrors){
             //setting reference solution
-            auto exactSolution3D = [] (const TPZVec<REAL> &pt, TPZVec<STATE> &sol, TPZFMatrix<STATE> &solDx){
-                const auto & x = pt[0], y = pt[1], z = pt[2];
-                sol.Resize(3);
-                sol[0] = sin(2*M_PI*y)*sin(2*M_PI*z);
-                sol[1] = sin(2*M_PI*x)*sin(2*M_PI*z);
-                sol[2] = sin(2*M_PI*x)*sin(2*M_PI*y);
-                solDx.Resize(3,1);
-                solDx(0,0) =  2*M_PI*cos(2*M_PI*y)*sin(2*M_PI*x) - 2*M_PI*cos(2*M_PI*z)*sin(2*M_PI*x);
-                solDx(1,0) = -2*M_PI*cos(2*M_PI*x)*sin(2*M_PI*y) + 2*M_PI*cos(2*M_PI*z)*sin(2*M_PI*y);
-                solDx(2,0) =  2*M_PI*cos(2*M_PI*x)*sin(2*M_PI*z) - 2*M_PI*cos(2*M_PI*y)*sin(2*M_PI*z);
-            };
             switch(dim){
                 case 3:
-                    an.SetExact(exactSolution3D);
+                    an.SetExact(ExactSolution3D);
                     break;
                 default:
                     DebugStop();
@@ -254,7 +255,7 @@ int main(int argc, char **argv)
             if(postProcess){
                 std::cout<<"\t\tPost processing..."<<std::endl;
                 an.DefineGraphMesh(dim, scalnames, vecnames, plotfile);
-                an.SetStep(itP);
+                an.SetStep(itH*(nPRefinements+1) + itP);
                 an.PostProcess(postProcessResolution);
                 std::cout<<"\t\tPost processing finished."<<std::endl;
             }

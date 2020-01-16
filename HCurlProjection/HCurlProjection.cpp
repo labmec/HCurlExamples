@@ -1,9 +1,7 @@
 /**********************************************************************
 * This example aims to demonstrate the usage of HCurl-conforming      *
-* elements using the NeoPZ library. It solves the Helmholtz equation  *
-* in two and three dimensions using HCurl-conforming elements.        *
-* The domain is a unit square/cube,     BLABLALBLALBLABLA             *
-* dirichlet homogeneous conditions are imposed in all boundaries.     *
+* elements using the NeoPZ library projecting a given solution in a   *
+* Hcurl conforming mesh in two and three dimensions.                  *
 **********************************************************************/
 
 #include "pzgmesh.h"
@@ -12,7 +10,7 @@
 #include "TPZMatHCurlProjection.h"
 #include "pzbndcond.h"
 #include "pzstepsolver.h"
-#include <pzshapelinear.h>//in order to adjust the polynomial family to be used
+#include "pzshapelinear.h"//in order to adjust the polynomial family to be used
 #include "TPZCompMeshTools.h"
 #ifdef USING_MKL
 #include "StrMatrix/TPZSSpStructMatrix.h"
@@ -22,10 +20,8 @@
 #include "Pre/pzgengrid.h"
 #include "pzintel.h"
 #include "Mesh/pzcondensedcompel.h"
+#include "Post/TPZVTKGeoMesh.h"
 #include <string>
-#include <Post/TPZVTKGeoMesh.h>
-#include <Refine/TPZRefPatternDataBase.h>
-
 enum EOrthogonalFuncs{
     EChebyshev = 0,EExpo = 1,ELegendre = 2 ,EJacobi = 3,EHermite = 4
 };
@@ -52,7 +48,8 @@ static TPZGeoMesh *CreateGeoMesh3D(int ndiv, MElementType meshType, TPZVec<int> 
 /**
 * Generates a computational mesh that implements the problem to be solved
 */
-static TPZCompMesh *CreateCompMesh(TPZGeoMesh *gmesh, const TPZVec<int> &matIds, const int initialPOrder, EOrthogonalFuncs familyType);
+static TPZCompMesh *CreateCompMesh(TPZGeoMesh *gmesh, const TPZVec<int> &matIds, const int initialPOrder,
+        EOrthogonalFuncs familyType);
 
 /**
  * This method will perform the P refinement on certain elements (adaptive P refinement).
@@ -72,8 +69,21 @@ static void PerformUniformPRefinement(TPZCompMesh *cmesh, TPZAnalysis &an);
 static void FilterBoundaryEquations(TPZCompMesh *cmesh, TPZVec<int64_t> &activeEquations, int64_t &neq,
                              int64_t &neqOriginal);
 
+void ExactSolution3D(const TPZVec<REAL> &pt, TPZVec<STATE> &sol, TPZFMatrix<STATE> &solDx){
+    const auto & x = pt[0], y = pt[1], z = pt[2];
+    sol.Resize(3);
+    sol[0] = (y*y-y)*(z*z-z);
+    sol[1] = (z*z-z)*(x*x-x);
+    sol[2] = (x*x-x)*(y*y-y);
+    solDx.Resize(3,1);
+    solDx(0,0) = (-x + x*x)*(-1 + 2*y) - (-x + x*x)*(-1 + 2*z);
+    solDx(1,0) = -((-1 + 2*x)*(-y + y*y)) + (-y + y*y)*(-1 + 2*z);
+    solDx(2,0) = (-1 + 2*x)*(-z + z*z) - (-1 + 2*y)*(-z + z*z);
+};
+
 int main(int argc, char **argv)
 {
+    using namespace std::placeholders;
 #ifdef LOG4CXX
     InitializePZLOG();
 #endif
@@ -167,39 +177,6 @@ int main(int argc, char **argv)
         //creates computational mesh
         TPZCompMesh *cMesh = CreateCompMesh(gMesh, matIdVec, initialPOrder, orthogonalPolyFamily);
 
-        {//@TODOFran: REMOVER
-        delete cMesh->Element(0);
-        delete cMesh->Element(1);
-        delete cMesh->Element(2);
-//        delete cMesh->Element(3);
-//        delete cMesh->Element(4);
-        delete cMesh->Element(5);
-        delete cMesh->Element(6);
-        delete cMesh->Element(7);
-        delete cMesh->Element(8);
-        delete cMesh->Element(9);
-
-        TPZVec<int64_t> connectIndexes(3,-1);
-        connectIndexes[0] = 5;
-        connectIndexes[1] = 24;
-        connectIndexes[2] = 15;
-//        connectIndexes[3] = 34;
-
-        for(auto con : connectIndexes){
-            auto newIndex = cMesh->AllocateNewConnect(cMesh->ConnectVec()[con]);
-            int oldIndex = -1;
-            for(auto icon = 0; icon < cMesh->Element(4)->NConnects(); icon++){
-                if(cMesh->Element(4)->ConnectIndex(icon) == con) oldIndex = icon;
-            }
-            cMesh->Element(4)->SetConnectIndex(oldIndex,newIndex);
-        }
-
-
-        cMesh->CleanUpUnconnectedNodes();
-        cMesh->ExpandSolution();
-
-        }
-
         {
             std::string compMeshName("compMesh"+executionInfo);
             std::ofstream compMeshTxt(compMeshName+".txt");
@@ -231,20 +208,9 @@ int main(int argc, char **argv)
         an.SetSolver(step);
         if(calcErrors){
             //setting reference solution
-            auto exactSolution3D = [] (const TPZVec<REAL> &pt, TPZVec<STATE> &sol, TPZFMatrix<STATE> &solDx){
-                const auto & x = pt[0], y = pt[1], z = pt[2];
-                sol.Resize(3);
-                sol[0] = (y*y-y)*(z*z-z);
-                sol[1] = (z*z-z)*(x*x-x);
-                sol[2] = (x*x-x)*(y*y-y);
-                solDx.Resize(3,1);
-                solDx(0,0) = (-x + x*x)*(-1 + 2*y) - (-x + x*x)*(-1 + 2*z);
-                solDx(1,0) = -((-1 + 2*x)*(-y + y*y)) + (-y + y*y)*(-1 + 2*z);
-                solDx(2,0) = (-1 + 2*x)*(-z + z*z) - (-1 + 2*y)*(-z + z*z);
-            };
             switch(dim){
                 case 3:
-                    an.SetExact(exactSolution3D);
+                    an.SetExact(ExactSolution3D);
                     break;
                 default:
                     DebugStop();
@@ -279,13 +245,10 @@ int main(int argc, char **argv)
             std::cout<<"\tAssembling matrix with NDoF = "<<an.StructMatrix()->EquationFilter().NActiveEquations()<<"."<<std::endl;
             an.Assemble(); //Assembles the global stiffness matrix (and load vector)
             std::cout<<"\tAssemble finished."<<std::endl;
-            {//@TODOFran: REMOVER
-                const std::string matFileName = "matrix"+executionInfo+".nb";//where to print the matrix files
-                std::ofstream matFile(matFileName);
-                an.Solver().Matrix()->Print("will_be_ignored",matFile,EMathematicaInput);
-            }
             std::cout<<"\tSolving system..."<<std::endl;
             an.Solve();
+            an.LoadSolution();
+
             std::cout<<"\tSolving finished."<<std::endl;
             if(calcErrors){
                 std::cout<<"\t\tCalculating errors..."<<std::endl;
@@ -364,9 +327,8 @@ TPZGeoMesh *CreateGeoMesh3D(int ndiv, MElementType meshType, TPZVec<int> &matIds
     constexpr int maxX{1},maxY{1},maxZ{1};
     constexpr int matIdDomain{1};
 
-//    TPZGenGrid3D genGrid3D(minX,minY,minZ,maxX,maxY,maxZ,ndiv,ndiv,ndiv,meshType);
-    //@TODOFran: REMOVER
-    TPZGenGrid3D genGrid3D(minX,minY,minZ,maxX,maxY,maxZ,1,ndiv,1,meshType);
+    TPZGenGrid3D genGrid3D(minX,minY,minZ,maxX,maxY,maxZ,ndiv,ndiv,ndiv,meshType);
+
     TPZGeoMesh *gmesh = genGrid3D.BuildVolumetricElements(matIdDomain);
     gmesh->BuildConnectivity();
 
@@ -389,23 +351,16 @@ TPZCompMesh *CreateCompMesh(TPZGeoMesh *gmesh, const TPZVec<int> &matIds, const 
     //Inserting material
     auto mat = new TPZMatHCurlProjection(dim,matId);
 
-
-    auto forcingFunction3D = [](const TPZVec<REAL>& pt, TPZVec<STATE> &result){
-        static const auto aux = 8*M_PI*M_PI;
-
-        const REAL &x = pt[0];
-        const REAL &y = pt[1];
-        const REAL &z = pt[2];
-        result[0] = (y*y-y)*(z*z-z);
-        result[1] = (z*z-z)*(x*x-x);
-        result[2] = (x*x-x)*(y*y-y);
-    };
-
     constexpr int pOrderForcingFunction{4};
     switch(dim){
-        case 3:
-            mat->SetForcingFunction(forcingFunction3D,pOrderForcingFunction);
+        case 3:{
+            auto exactSol = [] (const TPZVec<REAL> &x, TPZVec<REAL> &sol){
+                TPZFMatrix<STATE> trash;
+                ExactSolution3D(x,sol,trash);
+            };
+            mat->SetForcingFunction(exactSol,pOrderForcingFunction);
             break;
+        }
         default:
             DebugStop();
     }
