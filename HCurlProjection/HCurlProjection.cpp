@@ -231,6 +231,7 @@ int main(int argc, char **argv)
             std::cout<<"\t============================"<<std::endl;
             std::cout<<"\t\tIteration (p) "<<itP+1<<" out of "<<nPRefinements + 1<<std::endl;
             if(condense) TPZCompMeshTools::CreatedCondensedElements(cMesh,false,false);
+            an.SetCompMesh(cMesh,optimizeBandwidth);
             if(filterBoundaryEqs){
                 int64_t neqOriginal = -1, neqReduced = -1;
                 activeEquations.Resize(0);
@@ -241,7 +242,6 @@ int main(int argc, char **argv)
             }else{
                 an.StructMatrix()->EquationFilter().SetNumEq(cMesh->NEquations());
             }
-            an.SetCompMesh(cMesh,optimizeBandwidth);
             std::cout<<"\tAssembling matrix with NDoF = "<<an.StructMatrix()->EquationFilter().NActiveEquations()<<"."<<std::endl;
             an.Assemble(); //Assembles the global stiffness matrix (and load vector)
             std::cout<<"\tAssemble finished."<<std::endl;

@@ -97,13 +97,13 @@ int main(int argc, char **argv)
     //physical dimension of the problem
     constexpr int dim{3};
     //number of divisions of each direction (x, y or x,y,z) of the domain
-    constexpr int nDiv{4};
+    constexpr int nDiv{2};
     //initial polynomial order
     constexpr int initialPOrder{1};
     //this will set how many rounds of p-refinements will be performed
     constexpr int nPRefinements{0};
     //this will set how many rounds of h-refinements will be performed
-    constexpr int nHRefinements{0};
+    constexpr int nHRefinements{4};
     //whether to calculate the errors
     constexpr bool calcErrors = true;
     //whether to perform adaptive or uniform p-refinement
@@ -118,7 +118,7 @@ int main(int argc, char **argv)
     //which family of polynomials to use
     EOrthogonalFuncs orthogonalPolyFamily = EChebyshev;//EChebyshev = 0,EExpo = 1,ELegendre = 2 ,EJacobi = 3,EHermite = 4
     //whether to generate .vtk files
-    constexpr bool postProcess{true};
+    constexpr bool postProcess{false};
     constexpr int postProcessResolution{2};
     constexpr MElementType elType{ETetraedro};
     if(!calcErrors && adaptiveP){
@@ -229,6 +229,7 @@ int main(int argc, char **argv)
             std::cout<<"\t============================"<<std::endl;
             std::cout<<"\t\tIteration (p) "<<itP+1<<" out of "<<nPRefinements + 1<<std::endl;
             if(condense) TPZCompMeshTools::CreatedCondensedElements(cMesh,false,false);
+            an.SetCompMesh(cMesh,optimizeBandwidth);
             if(filterBoundaryEqs){
                 int64_t neqOriginal = -1, neqReduced = -1;
                 activeEquations.Resize(0);
@@ -239,7 +240,6 @@ int main(int argc, char **argv)
             }else{
                 an.StructMatrix()->EquationFilter().SetNumEq(cMesh->NEquations());
             }
-            an.SetCompMesh(cMesh,optimizeBandwidth);
             std::cout<<"\tAssembling matrix with NDoF = "<<an.StructMatrix()->EquationFilter().NActiveEquations()<<"."<<std::endl;
             an.Assemble(); //Assembles the global stiffness matrix (and load vector)
             std::cout<<"\tAssemble finished."<<std::endl;
@@ -511,11 +511,11 @@ void FilterBoundaryEquations(TPZCompMesh *cmesh, TPZVec<int64_t> &activeEquation
         if (boundConnects.find(iCon) == boundConnects.end()) {
             TPZConnect &con = cmesh->ConnectVec()[iCon];
             if(con.IsCondensed()) continue;
-            int seqnum = con.SequenceNumber();
-            int pos = cmesh->Block().Position(seqnum);
-            int blocksize = cmesh->Block().Size(seqnum);
+            const int seqnum = con.SequenceNumber();
+            const int pos = cmesh->Block().Position(seqnum);
+            const int blocksize = cmesh->Block().Size(seqnum);
             if (blocksize == 0) continue;
-            int vs = activeEquations.size();
+            const int vs = activeEquations.size();
             activeEquations.Resize(vs + blocksize);
             for (int ieq = 0; ieq < blocksize; ieq++) {
                 activeEquations[vs + ieq] = pos + ieq;
