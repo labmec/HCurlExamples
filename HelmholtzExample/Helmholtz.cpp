@@ -2,7 +2,7 @@
 * This example aims to demonstrate the usage of HCurl-conforming      *
 * elements using the NeoPZ library. It solves the Helmholtz equation  *
 * in two and three dimensions using HCurl-conforming elements.        *
-* The domain is a unit square/cube,     BLABLALBLALBLABLA             *
+* The domain is a unit square/cube,  ranging from [0,1]^3 and         *
 * dirichlet homogeneous conditions are imposed in all boundaries.     *
 **********************************************************************/
 
@@ -89,7 +89,7 @@ int main(int argc, char **argv)
 #ifdef LOG4CXX
     InitializePZLOG();
 #endif
-    constexpr int numthreads{8};//number of threads to be used throughout the program
+    constexpr int numthreads{32};//number of threads to be used throughout the program
 #ifdef USING_MKL
     mkl_set_dynamic(0); // disable automatic adjustment of the number of threads
     mkl_set_num_threads(numthreads);
@@ -99,9 +99,9 @@ int main(int argc, char **argv)
     //number of divisions of each direction (x, y or x,y,z) of the domain
     constexpr int nDiv{2};
     //initial polynomial order
-    constexpr int initialPOrder{1};
+    constexpr int initialPOrder{4};
     //this will set how many rounds of p-refinements will be performed
-    constexpr int nPRefinements{2};
+    constexpr int nPRefinements{0};
     //this will set how many rounds of h-refinements will be performed
     constexpr int nHRefinements{6};
     //whether to calculate the errors
@@ -157,12 +157,12 @@ int main(int argc, char **argv)
         std::ofstream convfile;
         convfile.open(convfileName,std::ofstream::out | std::ofstream::trunc);//erases the content
         std::ostringstream fileInfo;
-        fileInfo<<std::left<<std::setw(20)<<"h\t"
-                <<std::left<<std::setw(20)<<"p\t"
-                <<std::left<<std::setw(20)<<"nel\t"
-                <<std::left<<std::setw(20)<<"neq\t"
-                <<std::left<<std::setw(20)<<"e1\t"
-                <<std::left<<std::setw(20)<<"e2\t"
+        fileInfo<<std::left<<std::setw(20)<<"h,"
+                <<std::left<<std::setw(20)<<"p,"
+                <<std::left<<std::setw(20)<<"nel,"
+                <<std::left<<std::setw(20)<<"neq,"
+                <<std::left<<std::setw(20)<<"e1,"
+                <<std::left<<std::setw(20)<<"e2,"
                 <<std::left<<std::setw(20)<<"e3";
         fileInfo<<"\n";
         convfile << fileInfo.str();
@@ -201,12 +201,6 @@ int main(int argc, char **argv)
 
         //creates computational mesh
         TPZCompMesh *cMesh = CreateCompMesh(gMesh,matIdVec,initialPOrder,orthogonalPolyFamily);
-
-        {
-            std::string compMeshName("compMesh"+executionInfo);
-            std::ofstream compMeshTxt(compMeshName+".txt");
-            cMesh->Print(compMeshTxt);
-        }
         //Setting up the analysis object
         constexpr bool optimizeBandwidth{true};
         TPZAnalysis an(cMesh, optimizeBandwidth); //Creates the object that will manage the analysis of the problem
@@ -255,10 +249,17 @@ int main(int argc, char **argv)
         cMesh->ElementSolution().Resize(cMesh->NElements(),3);
         TPZVec<int64_t> activeEquations;
         for(auto itP = 0 ; itP < nPRefinements + 1; itP++){
+
+            {
+                std::string compMeshName("compMesh"+executionInfo+"_steph_"+std::to_string(itH)+"_stepp_"+std::to_string(itP));
+                std::ofstream compMeshTxt(compMeshName+".txt");
+                cMesh->Print(compMeshTxt);
+            }
+
             std::cout<<"\t============================"<<std::endl;
             std::cout<<"\t\tIteration (p) "<<itP+1<<" out of "<<nPRefinements + 1<<std::endl;
             if(condense) TPZCompMeshTools::CreatedCondensedElements(cMesh,false,false);
-            an.SetCompMesh(cMesh,optimizeBandwidth);
+            if(condense || itP > 0 ) an.SetCompMesh(cMesh,optimizeBandwidth);
             if(filterBoundaryEqs){
                 int64_t neqOriginal = -1, neqReduced = -1;
                 activeEquations.Resize(0);
