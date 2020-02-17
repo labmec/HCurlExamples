@@ -89,7 +89,7 @@ int main(int argc, char **argv)
 #ifdef LOG4CXX
     InitializePZLOG();
 #endif
-    constexpr int numthreads{0};//number of threads to be used throughout the program
+    constexpr int numthreads{8};//number of threads to be used throughout the program
 #ifdef USING_MKL
     mkl_set_dynamic(0); // disable automatic adjustment of the number of threads
     mkl_set_num_threads(numthreads);
@@ -101,9 +101,9 @@ int main(int argc, char **argv)
     //initial polynomial order
     constexpr int initialPOrder{1};
     //this will set how many rounds of p-refinements will be performed
-    constexpr int nPRefinements{0};
+    constexpr int nPRefinements{2};
     //this will set how many rounds of h-refinements will be performed
-    constexpr int nHRefinements{4};
+    constexpr int nHRefinements{6};
     //whether to calculate the errors
     constexpr bool calcErrors = true;
     //whether to perform adaptive or uniform p-refinement
@@ -114,31 +114,60 @@ int main(int argc, char **argv)
     //whether to apply static condensation on the internal dofs
     constexpr bool condense{false};
     //whether to remove the dirichlet boundary conditions from the matrix
-    constexpr bool filterBoundaryEqs{false};
+    constexpr bool filterBoundaryEqs{true};
     //which family of polynomials to use
     EOrthogonalFuncs orthogonalPolyFamily = EChebyshev;//EChebyshev = 0,EExpo = 1,ELegendre = 2 ,EJacobi = 3,EHermite = 4
     //whether to generate .vtk files
     constexpr bool postProcess{false};
     constexpr int postProcessResolution{2};
     constexpr MElementType elType{ETetraedro};
+    constexpr bool exportConvergenceResults{true};
+
     if(!calcErrors && adaptiveP){
         std::cout<<"Either calculate the errors or choose uniform p-refinement. Aborting...\n";
         return -1;
     }
     const std::string executionInfo = [&](){
         std::string name("");
+        switch(elType){
+            case ETetraedro: name.append("_elTet");
+            break;
+            case ECube: name.append("_elHex");
+            break;
+            case EPrisma: name.append("_elPri");
+            break;
+        }
         if(adaptiveP) name.append("_adapP");
         else name.append("_unifP");
         name.append("_initialP");
         name.append(std::to_string(initialPOrder));
         name.append("_nPrefs");
         name.append(std::to_string(nPRefinements));
-        name.append("_nDivs");
+        name.append("_initialDiv");
         name.append(std::to_string(nDiv));
+        name.append("_nHrefs");
+        name.append(std::to_string(nHRefinements));
         return name;
     }();
     const std::string plotfile = "solution"+executionInfo+".vtk";//where to print the vtk files
+    const std::string convfileName = "convRes"+executionInfo+".csv";//where to print the convergence results
 
+
+    if(exportConvergenceResults){
+        std::ofstream convfile;
+        convfile.open(convfileName,std::ofstream::out | std::ofstream::trunc);//erases the content
+        std::ostringstream fileInfo;
+        fileInfo<<std::left<<std::setw(20)<<"h\t"
+                <<std::left<<std::setw(20)<<"p\t"
+                <<std::left<<std::setw(20)<<"nel\t"
+                <<std::left<<std::setw(20)<<"neq\t"
+                <<std::left<<std::setw(20)<<"e1\t"
+                <<std::left<<std::setw(20)<<"e2\t"
+                <<std::left<<std::setw(20)<<"e3";
+        fileInfo<<"\n";
+        convfile << fileInfo.str();
+        convfile.close();
+    }
     for(auto itH = 0 ; itH < nHRefinements + 1; itH++){
         std::cout<<"============================"<<std::endl;
         std::cout<<"\tIteration (h) "<<itH+1<<" out of "<<nHRefinements + 1<<std::endl;
@@ -251,6 +280,23 @@ int main(int argc, char **argv)
                 TPZVec<REAL> errorVec(3,0);
                 an.PostProcessError(errorVec,true);
                 std::cout<<"############"<<std::endl;
+                if(exportConvergenceResults){
+                    std::ostringstream res;
+                    typedef std::numeric_limits< double > dbl;
+                    res.precision(dbl::max_digits10);
+                    //"h    p    nel    neq    e1    e2    e3\n";
+                    res << std::left << std::setw(20)<< std::fixed << 1./(nDiv * (itH + 1)) <<","
+                        << std::left << std::setw(20)<< std::fixed << initialPOrder + itP <<","
+                        << std::left << std::setw(20)<< std::fixed << cMesh->NElements() <<","
+                        << std::left << std::setw(20)<< std::fixed << an.StructMatrix()->EquationFilter().NActiveEquations() <<","
+                        << std::left << std::setw(20)<< std::fixed << errorVec[0] <<","
+                        << std::left << std::setw(20)<< std::fixed << errorVec[1] <<","
+                        << std::left << std::setw(20)<< std::fixed << errorVec[2] <<"\n";
+                    std::ofstream convfile;
+                    convfile.open(convfileName,std::ofstream::out | std::ofstream::app);
+                    convfile<<res.str();
+                    convfile.close();
+                }
             }
             if(postProcess){
                 std::cout<<"\t\tPost processing..."<<std::endl;
