@@ -19,7 +19,7 @@
 #else
 #include "StrMatrix/pzskylstrmatrix.h"
 #endif
-#include "Pre/pzgengrid.h"
+#include "Pre/TPZGenGrid2D.h"
 #include "pzintel.h"
 #include "Mesh/pzcondensedcompel.h"
 #include <string>
@@ -44,10 +44,10 @@ static TPZGeoMesh *CreateGeoMesh2D(int ndiv, MElementType meshType, TPZVec<int> 
  * (0,0,0), (1,0,0), (0,1,0), (1,1,0),(0,0,1), (1,0,1), (0,1,1), (1,1,1).
  * @param dim dimension of the problem
  * @param ndiv number of divisions on the x, y and z directions
- * @param meshType defines with elements will be created (tetrahedral, hexahedral and prismatic)
+ * @param meshType defines with elements will be created (tetrahedral, hexahedral, pyramidal, hex/pyr and prismatic)
  * @param matIds stores the material identifiers
  */
-static TPZGeoMesh *CreateGeoMesh3D(int ndiv, MElementType meshType, TPZVec<int> &matIds);
+static TPZGeoMesh *CreateGeoMesh3D(int ndiv, MMeshType meshType, TPZVec<int> &matIds);
 
 /**
 * Generates a computational mesh that implements the problem to be solved
@@ -120,7 +120,8 @@ int main(int argc, char **argv)
     //whether to generate .vtk files
     constexpr bool postProcess{false};
     constexpr int postProcessResolution{2};
-    constexpr MElementType elType{ETetraedro};
+    constexpr MMeshType elType3D{MMeshType::ETetrahedral};
+    constexpr MElementType elType2D{MElementType::ETriangle};
     constexpr bool exportConvergenceResults{true};
 
     if(!calcErrors && adaptiveP){
@@ -129,12 +130,14 @@ int main(int argc, char **argv)
     }
     const std::string executionInfo = [&](){
         std::string name("");
-        switch(elType){
-            case ETetraedro: name.append("_elTet");
+        switch(elType3D){
+            case MMeshType::ETetrahedral: name.append("_elTet");
             break;
-            case ECube: name.append("_elHex");
+            case MMeshType::EHexahedral: name.append("_elHex");
             break;
-            case EPrisma: name.append("_elPri");
+            case MMeshType::EHexaPyrMixed: name.append("_elHexPyr");
+            break;
+            case MMeshType::EPrismatic: name.append("_elPri");
             break;
         }
         if(adaptiveP) name.append("_adapP");
@@ -179,9 +182,9 @@ int main(int argc, char **argv)
         TPZVec<int> matIdVec;
         TPZGeoMesh *gMesh = [&]() -> TPZGeoMesh *{
             switch(dim){
-                case 2: return CreateGeoMesh2D(nDiv * (itH + 1),ETriangle,matIdVec);
+                case 2: return CreateGeoMesh2D(nDiv * (itH + 1),elType2D,matIdVec);
                     break;
-                case 3: return CreateGeoMesh3D(nDiv * (itH + 1),ETetraedro,matIdVec);
+                case 3: return CreateGeoMesh3D(nDiv * (itH + 1),elType3D,matIdVec);
                     break;
                 default:
                     DebugStop();
@@ -335,7 +338,7 @@ TPZGeoMesh *CreateGeoMesh2D(int ndiv, MElementType meshType, TPZVec<int> &matIds
     nelem[0] = ndiv;
     nelem[1] = ndiv;
 
-    TPZGenGrid gengrid(nelem, coord1, coord2);
+    TPZGenGrid2D gengrid(nelem, coord1, coord2);
 
     switch (meshType) {
         case EQuadrilateral:
@@ -366,7 +369,7 @@ TPZGeoMesh *CreateGeoMesh2D(int ndiv, MElementType meshType, TPZVec<int> &matIds
     return gmesh;
 }//CreateGeoMesh2D
 
-TPZGeoMesh *CreateGeoMesh3D(int ndiv, MElementType meshType, TPZVec<int> &matIds) {
+TPZGeoMesh *CreateGeoMesh3D(int ndiv, MMeshType meshType, TPZVec<int> &matIds) {
     //Creating geometric mesh, nodes and elements.
     //Including nodes and elements in the mesh object:
     //create boundary elements
