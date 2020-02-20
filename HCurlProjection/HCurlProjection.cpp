@@ -5,9 +5,9 @@
 **********************************************************************/
 
 #include "pzgmesh.h"
-#include "TPZGenGrid3D.h"
 #include "pzanalysis.h"
 #include "TPZMatHCurlProjection.h"
+#include "Mesh/TPZGeoMeshTools.h"
 #include "pzbndcond.h"
 #include "pzstepsolver.h"
 #include "pzshapelinear.h"//in order to adjust the polynomial family to be used
@@ -17,7 +17,6 @@
 #else
 #include "StrMatrix/pzskylstrmatrix.h"
 #endif
-#include "Pre/pzgengrid.h"
 #include "pzintel.h"
 #include "Mesh/pzcondensedcompel.h"
 #include "Post/TPZVTKGeoMesh.h"
@@ -25,25 +24,6 @@
 enum EOrthogonalFuncs{
     EChebyshev = 0,EExpo = 1,ELegendre = 2 ,EJacobi = 3,EHermite = 4
 };
-
-/**
- * @brief Routine from creating the geometric mesh of the domain. It is a square with nodes
- * (0,0), (1,0), (1,1), (0,1).
- * @param dim dimension of the problem
- * @param ndiv number of divisions on the x and y directions
- * @param meshType defines with elements will be created (triangular, square, trapezoidal)
- * @param matIds stores the material identifiers
- */
-static TPZGeoMesh *CreateGeoMesh2D(int ndiv, MElementType meshType, TPZVec<int> &matIds);
-/**
- * @brief Routine from creating the geometric mesh of the domain. It is a cube with nodes
- * (0,0,0), (1,0,0), (0,1,0), (1,1,0),(0,0,1), (1,0,1), (0,1,1), (1,1,1).
- * @param dim dimension of the problem
- * @param ndiv number of divisions on the x, y and z directions
- * @param meshType defines with elements will be created (tetrahedral, hexahedral and prismatic)
- * @param matIds stores the material identifiers
- */
-static TPZGeoMesh *CreateGeoMesh3D(int ndiv, MElementType meshType, TPZVec<int> &matIds);
 
 /**
 * Generates a computational mesh that implements the problem to be solved
@@ -120,7 +100,7 @@ int main(int argc, char **argv)
     //post-processing resolution
     constexpr int postProcessResolution{0};
 
-    constexpr MElementType elType{ETetraedro};
+    constexpr MMeshType meshType{MMeshType::ETetrahedral};
 
     //Setting up the analysis object
     constexpr bool optimizeBandwidth{false};
@@ -149,19 +129,12 @@ int main(int argc, char **argv)
          * in this file for an example.
          * The material ids are identifiers used in NeoPZ to identify different domain's regions/properties.
          */
-        TPZVec<int> matIdVec;
-        TPZGeoMesh *gMesh = [&]() -> TPZGeoMesh * {
-            switch (dim) {
-                case 2:
-                    return CreateGeoMesh2D(nDiv * (itH + 1), ETriangle, matIdVec);
-                    break;
-                case 3:
-                    return CreateGeoMesh3D(nDiv * (itH + 1), ETetraedro, matIdVec);
-                    break;
-                default:
-                    DebugStop();
-            }
-            return nullptr;
+        TPZVec<int> matIdVec(1,1);
+        TPZGeoMesh *gMesh = [&]() -> TPZGeoMesh *{
+            static TPZManVector<REAL,3> minX(3,0);
+            static TPZManVector<REAL,3> maxX(3,1);
+            TPZVec<int> nDivs(dim,nDiv * (itH + 1));
+            return TPZGeoMeshTools::CreateGeoMeshOnGrid(dim,minX,maxX,matIdVec,nDivs,meshType,false);
         }();
         std::cout << "\tNumber of elements: " << gMesh->NElements() << std::endl;
         //prints mesh
@@ -275,67 +248,6 @@ int main(int argc, char **argv)
     }
     return 0;
 }
-
-TPZGeoMesh *CreateGeoMesh2D(int ndiv, MElementType meshType, TPZVec<int> &matIds) {
-    //Creating geometric mesh, nodes and elements.
-    //Including nodes and elements in the mesh object:
-    TPZGeoMesh *gmesh = new TPZGeoMesh();
-    constexpr int dim{2};
-    gmesh->SetDimension(dim);
-
-    //Auxiliary vector to store coordinates:
-    TPZVec<REAL> coord1(3, 0.);
-    TPZVec<REAL> coord2(3, 0.);
-    coord1[0] = 0;coord1[1] = 0;coord1[2] = 0;
-    coord2[0] = 1;coord2[1] = 1;coord2[2] = 0;
-
-    TPZManVector<int> nelem(2, 1);
-    nelem[0] = ndiv;
-    nelem[1] = ndiv;
-
-    TPZGenGrid gengrid(nelem, coord1, coord2);
-
-    switch (meshType) {
-        case EQuadrilateral:
-            gengrid.SetElementType(EQuadrilateral);
-            break;
-        case ETriangle:
-            gengrid.SetElementType(ETriangle);
-            break;
-        default:
-            DebugStop();
-    }
-    constexpr int matIdDomain = 1;
-    gengrid.Read(gmesh, matIdDomain);
-
-    gmesh->BuildConnectivity();
-
-    {
-        TPZCheckGeom check(gmesh);
-        check.CheckUniqueId();
-    }
-    matIds.Resize(1);
-    matIds[0] = matIdDomain;
-    return gmesh;
-}//CreateGeoMesh2D
-
-TPZGeoMesh *CreateGeoMesh3D(int ndiv, MElementType meshType, TPZVec<int> &matIds) {
-    //Creating geometric mesh, nodes and elements.
-    //Including nodes and elements in the mesh object:
-    //create boundary elements
-    constexpr int minX{0},minY{0},minZ{0};
-    constexpr int maxX{1},maxY{1},maxZ{1};
-    constexpr int matIdDomain{1};
-
-    TPZGenGrid3D genGrid3D(minX,minY,minZ,maxX,maxY,maxZ,ndiv,ndiv,ndiv,meshType);
-
-    TPZGeoMesh *gmesh = genGrid3D.BuildVolumetricElements(matIdDomain);
-    gmesh->BuildConnectivity();
-
-    matIds.Resize(1);
-    matIds[0] = matIdDomain;
-    return gmesh;
-}//CreateGeoMesh3D
 
 TPZCompMesh *CreateCompMesh(TPZGeoMesh *gmesh, const TPZVec<int> &matIds, const int initialPOrder, EOrthogonalFuncs familyType){
     TPZCompMesh *cmesh = new TPZCompMesh(gmesh);
