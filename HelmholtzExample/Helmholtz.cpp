@@ -6,24 +6,25 @@
 * dirichlet homogeneous conditions are imposed in all boundaries.     *
 **********************************************************************/
 
-#include "pzgmesh.h"
+#include "Analysis/pzanalysis.h"
+#include "Material/TPZMatHelmholtz.h"
+#include "Material/pzbndcond.h"
+#include "Matrix/pzstepsolver.h"
+#include "Mesh/pzgmesh.h"
 #include "Mesh/TPZGeoMeshTools.h"
-#include "pzanalysis.h"
-#include "TPZMatHelmholtz.h"
-#include "pzbndcond.h"
-#include "pzstepsolver.h"
-#include <pzshapelinear.h>//in order to adjust the polynomial family to be used
-#include "TPZCompMeshTools.h"
+#include "Mesh/pzintel.h"
+#include "Mesh/pzcondensedcompel.h"
+#include "Mesh/TPZCompMeshTools.h"
+#include "Post/TPZVTKGeoMesh.h"
+#include "Shape/pzshapelinear.h"//in order to adjust the polynomial family to be used
 #ifdef USING_MKL
 #include "StrMatrix/TPZSSpStructMatrix.h"
 #else
 #include "StrMatrix/pzskylstrmatrix.h"
 #endif
-#include "pzintel.h"
-#include "Mesh/pzcondensedcompel.h"
+
+
 #include <string>
-#include <Post/TPZVTKGeoMesh.h>
-#include <Refine/TPZRefPatternDataBase.h>
 
 enum EOrthogonalFuncs{
     EChebyshev = 0,EExpo = 1,ELegendre = 2 ,EJacobi = 3,EHermite = 4
@@ -69,7 +70,7 @@ int main(int argc, char **argv)
 #ifdef LOG4CXX
     InitializePZLOG();
 #endif
-    constexpr int numthreads{32};//number of threads to be used throughout the program
+    constexpr int numthreads{16};//number of threads to be used throughout the program
 #ifdef USING_MKL
     mkl_set_dynamic(0); // disable automatic adjustment of the number of threads
     mkl_set_num_threads(numthreads);
@@ -77,13 +78,13 @@ int main(int argc, char **argv)
     //physical dimension of the problem
     constexpr int dim{3};
     //number of divisions of each direction (x, y or x,y,z) of the domain
-    constexpr int nDiv{2};
+    constexpr int nDiv{6};
     //initial polynomial order
-    constexpr int initialPOrder{4};
+    constexpr int initialPOrder{1};
     //this will set how many rounds of p-refinements will be performed
-    constexpr int nPRefinements{0};
+    constexpr int nPRefinements{4};
     //this will set how many rounds of h-refinements will be performed
-    constexpr int nHRefinements{6};
+    constexpr int nHRefinements{0};
     //whether to calculate the errors
     constexpr bool calcErrors = true;
     //whether to perform adaptive or uniform p-refinement
@@ -99,7 +100,7 @@ int main(int argc, char **argv)
     EOrthogonalFuncs orthogonalPolyFamily = EChebyshev;//EChebyshev = 0,EExpo = 1,ELegendre = 2 ,EJacobi = 3,EHermite = 4
     //whether to generate .vtk files
     constexpr bool postProcess{false};
-    constexpr int postProcessResolution{2};
+    constexpr int postProcessResolution{0};
     constexpr MMeshType meshType{MMeshType::ETetrahedral};
     constexpr bool exportConvergenceResults{true};
 
@@ -171,12 +172,18 @@ int main(int argc, char **argv)
             return TPZGeoMeshTools::CreateGeoMeshOnGrid(dim,minX,maxX,matIdVec,nDivs,meshType,true);
         }();
         std::cout<<"\tNumber of elements: "<<gMesh->NElements()<<std::endl;
+        //the HCurl functions on the pyramid are defined by imposing restriction over the functions of two tetrahedra
+        if(meshType == MMeshType::EHexaPyrMixed || meshType == MMeshType::EPyramidal){
+            TPZGeoMeshTools::DividePyramidsIntoTetra(gMesh);
+        }
         //prints mesh
         {
             std::string geoMeshName("geoMesh"+executionInfo);
             if(nHRefinements) geoMeshName += "_hdiv_"+std::to_string(itH);
-            std::ofstream geoMeshVtk(geoMeshName+".vtk");
-            TPZVTKGeoMesh::PrintGMeshVTK(gMesh, geoMeshVtk);
+            if(postProcess){
+                std::ofstream geoMeshVtk(geoMeshName+".vtk");
+                TPZVTKGeoMesh::PrintGMeshVTK(gMesh, geoMeshVtk);
+            }
             std::ofstream geoMeshTxt(geoMeshName+".txt");
             gMesh->Print(geoMeshTxt);
         }
@@ -226,6 +233,7 @@ int main(int argc, char **argv)
         vecnames.Push("E");//print the state variable
         vecnames.Push("curlE");//print the curl of the state variable
         if(calcErrors)  scalnames.Push("Error");//print the error of each element
+        if(adaptiveP)  scalnames.Push("POrder");//print the polynomial order of each element
         scalnames.Push("MaterialId");//print the material identifier of each element
         //resize the matrix that will store the error for each element
         cMesh->ElementSolution().Resize(cMesh->NElements(),3);
@@ -262,7 +270,13 @@ int main(int argc, char **argv)
                 std::cout<<"\t\tCalculating errors..."<<std::endl;
                 TPZVec<REAL> errorVec(3,0);
                 an.PostProcessError(errorVec,true);
+#ifndef PZDEBUG
+                std::cout << "############" << std::endl;
+                std::cout <<"HCurl Norm   -> u = "  << sqrt(errorVec[0]) << std::endl;
+                std::cout <<"L2 Norm      -> u = "  << sqrt(errorVec[1]) << std::endl;
+                std::cout <<"L2 Norm- > curl U = "  << sqrt(errorVec[2])  <<std::endl;
                 std::cout<<"############"<<std::endl;
+#endif
                 if(exportConvergenceResults){
                     std::ostringstream res;
                     typedef std::numeric_limits< double > dbl;
@@ -471,8 +485,9 @@ void FilterBoundaryEquations(TPZCompMesh *cmesh, TPZVec<int64_t> &activeEquation
     for (auto iCon = 0; iCon < cmesh->NConnects(); iCon++) {
         if (boundConnects.find(iCon) == boundConnects.end()) {
             TPZConnect &con = cmesh->ConnectVec()[iCon];
-            if(con.IsCondensed()) continue;
+            if(con.IsCondensed() || con.HasDependency()) continue;
             const int seqnum = con.SequenceNumber();
+            if(seqnum < 0) continue;
             const int pos = cmesh->Block().Position(seqnum);
             const int blocksize = cmesh->Block().Size(seqnum);
             if (blocksize == 0) continue;
