@@ -12,4 +12,5 @@ find_package(PZ REQUIRED)
 
 add_subdirectory(HelmholtzExample)
 add_subdirectory(HCurlProjection)
+add_subdirectory(Sphere)
 
