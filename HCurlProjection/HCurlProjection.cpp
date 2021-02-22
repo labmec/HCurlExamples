@@ -25,11 +25,12 @@ enum EOrthogonalFuncs{
     EChebyshev = 0,EExpo = 1,ELegendre = 2 ,EJacobi = 3,EHermite = 4
 };
 
+enum whichSol{ EPoly3d=1, EHarmonic3d};
 /**
 * Generates a computational mesh that implements the problem to be solved
 */
 static TPZCompMesh *CreateCompMesh(TPZGeoMesh *gmesh, const TPZVec<int> &matIds, const int initialPOrder,
-        EOrthogonalFuncs familyType);
+                                   EOrthogonalFuncs familyType, whichSol analyticSol);
 
 
 
@@ -55,7 +56,21 @@ static void PerformUniformPRefinement(TPZCompMesh *cmesh, TPZAnalysis &an);
 static void FilterBoundaryEquations(TPZCompMesh *cmesh, TPZVec<int64_t> &activeEquations, int64_t &neq,
                              int64_t &neqOriginal);
 
-void ExactSolution3D(const TPZVec<REAL> &pt, TPZVec<STATE> &sol, TPZFMatrix<STATE> &solDx){
+
+void HarmonicSolution3D(const TPZVec<REAL> &pt, TPZVec<STATE> &sol,
+                        TPZFMatrix<STATE> &solDx)
+{
+  const auto &x = pt[0], y = pt[1], z = pt[2];
+  sol.Resize(3);
+  sol[0] = sin ( M_PI * y) * sin(M_PI * z);
+  sol[1] = sin ( M_PI * z) * sin(M_PI * x);
+  sol[2] = sin ( M_PI * x) * sin(M_PI * y);
+  solDx.Resize(3,1);
+  solDx(0,0) = M_PI * cos(M_PI * y) * sin(M_PI * x) - M_PI * cos(M_PI * z) * sin(M_PI * x);
+  solDx(1,0) = M_PI * cos(M_PI * z) * sin(M_PI * y) - M_PI * cos(M_PI * x) * sin(M_PI * y);
+  solDx(2,0) = M_PI * cos(M_PI * x) * sin(M_PI * z) - M_PI * cos(M_PI * y) * sin(M_PI * z);
+}
+void PolynomialSolution3D(const TPZVec<REAL> &pt, TPZVec<STATE> &sol, TPZFMatrix<STATE> &solDx){
     const auto & x = pt[0], y = pt[1], z = pt[2];
     sol.Resize(3);
     sol[0] = (y*y-y)*(z*z-z);
@@ -82,6 +97,8 @@ int main(int argc, char **argv)
     constexpr int dim{3};
     //number of divisions of each direction (x, y or x,y,z) of the domain
     constexpr int nDiv{2};
+    //exact solution
+    auto exactSol = whichSol::EHarmonic3d;
     //initial polynomial order
     constexpr int initialPOrder{4};
     //this will set how many rounds of p-refinements will be performed
@@ -104,7 +121,7 @@ int main(int argc, char **argv)
     //whether to generate .vtk files
     constexpr bool postProcess{true};
     //post-processing resolution
-    constexpr int postProcessResolution{0};
+    constexpr int postProcessResolution{initialPOrder};
 
     constexpr MMeshType meshType{MMeshType::ETetrahedral};
 
@@ -154,7 +171,7 @@ int main(int argc, char **argv)
         }
 
         //creates computational mesh
-        TPZCompMesh *cMesh = CreateCompMesh(gMesh, matIdVec, initialPOrder, orthogonalPolyFamily);
+        TPZCompMesh *cMesh = CreateCompMesh(gMesh, matIdVec, initialPOrder, orthogonalPolyFamily, exactSol);
 
         {
             std::string compMeshName("compMesh"+executionInfo);
@@ -187,9 +204,12 @@ int main(int argc, char **argv)
         an.SetSolver(step);
         if(calcErrors){
             //setting reference solution
-            switch(dim){
-                case 3:
-                    an.SetExact(ExactSolution3D);
+            switch(exactSol){
+                case EHarmonic3d:
+                  an.SetExact(HarmonicSolution3D);
+                    break;
+                case EPoly3d:
+                  an.SetExact(PolynomialSolution3D);
                     break;
                 default:
                     DebugStop();
@@ -256,7 +276,9 @@ int main(int argc, char **argv)
     return 0;
 }
 
-TPZCompMesh *CreateCompMesh(TPZGeoMesh *gmesh, const TPZVec<int> &matIds, const int initialPOrder, EOrthogonalFuncs familyType){
+TPZCompMesh *CreateCompMesh(TPZGeoMesh *gmesh, const TPZVec<int> &matIds, const int initialPOrder,
+                            EOrthogonalFuncs familyType, whichSol analyticSol)
+{
     TPZCompMesh *cmesh = new TPZCompMesh(gmesh);
 
     //Definition of the approximation space
@@ -270,16 +292,28 @@ TPZCompMesh *CreateCompMesh(TPZGeoMesh *gmesh, const TPZVec<int> &matIds, const 
     //Inserting material
     auto mat = new TPZMatHCurlProjection(dim,matId);
 
-    constexpr int pOrderForcingFunction{4};
-    switch(dim){
-        case 3:{
-            auto exactSol = [] (const TPZVec<REAL> &x, TPZVec<REAL> &sol){
+    const int pOrderForcingFunction{initialPOrder};
+    switch(analyticSol){
+        case EHarmonic3d:
+          {
+            auto exactSol = [](const TPZVec<REAL> &x, TPZVec<REAL> &sol){
+              
                 TPZFMatrix<STATE> trash;
-                ExactSolution3D(x,sol,trash);
+                HarmonicSolution3D(x,sol,trash);
             };
             mat->SetForcingFunction(exactSol,pOrderForcingFunction);
             break;
-        }
+          }
+        case EPoly3d:
+          {
+            auto exactSol = [](const TPZVec<REAL> &x, TPZVec<REAL> &sol){
+              
+                TPZFMatrix<STATE> trash;
+                PolynomialSolution3D(x,sol,trash);
+            };
+            mat->SetForcingFunction(exactSol,pOrderForcingFunction);
+            break;
+          }
         default:
             DebugStop();
     }
