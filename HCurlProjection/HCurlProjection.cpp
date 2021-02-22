@@ -31,11 +31,17 @@ enum EOrthogonalFuncs{
 static TPZCompMesh *CreateCompMesh(TPZGeoMesh *gmesh, const TPZVec<int> &matIds, const int initialPOrder,
         EOrthogonalFuncs familyType);
 
+
+
+/**
+ * This method will return the maximum L2 error in the mesh.
+*/
+static REAL CalcMaxError(TPZCompMesh *cmesh, TPZAnalysis &an);
 /**
  * This method will perform the P refinement on certain elements (adaptive P refinement).
  * These elements are the ones whose error exceed a given percentage of the maximum error in the mesh.
  */
-static void PerformAdapativePRefinement(TPZCompMesh *cMesh, TPZAnalysis &an, const REAL errorPercentage);
+static void PerformAdapativePRefinement(TPZCompMesh *cMesh, TPZAnalysis &an, const REAL maxError, const REAL errorPercentage);
 
 /**
  * This method will perform uniform P refinement, i.e., all elements will have their polynomial order increased
@@ -229,6 +235,7 @@ int main(int argc, char **argv)
                 an.PostProcessError(errorVec,true);
                 std::cout<<"############"<<std::endl;
             }
+            const REAL maxError = CalcMaxError(cMesh, an);
             if(postProcess){
                 std::cout<<"\t\tPost processing..."<<std::endl;
                 const std::string plotfile = "solution"+executionInfo+"_itH_"+std::to_string(itH)+"_itP_.vtk";//where to print the vtk files
@@ -238,7 +245,7 @@ int main(int argc, char **argv)
                 std::cout<<"\t\tPost processing finished."<<std::endl;
             }
             if(itP < nPRefinements){
-                if(adaptiveP)   PerformAdapativePRefinement(cMesh, an, errorPercentage);
+              if(adaptiveP)   PerformAdapativePRefinement(cMesh, an, maxError, errorPercentage);
                 else PerformUniformPRefinement(cMesh,an);
             }
             if(condense) TPZCompMeshTools::UnCondensedElements(cMesh);
@@ -306,13 +313,13 @@ TPZCompMesh *CreateCompMesh(TPZGeoMesh *gmesh, const TPZVec<int> &matIds, const 
     return cmesh;
 }
 
-void PerformAdapativePRefinement(TPZCompMesh *cmesh, TPZAnalysis &an,
-                                 const REAL errorPercentage) {
-    std::cout<<"\tPerforming adaptive p-refinement..."<<std::endl;
-    const auto nElems = cmesh->Reference()->NElements();
-    // Iterates through element errors to get the maximum value
-    REAL maxError = -1;
-    for (int64_t iel = 0; iel < nElems; iel++) {
+
+REAL CalcMaxError(TPZCompMesh *cmesh, TPZAnalysis &an)
+{
+  const auto nElems = cmesh->NElements();
+  REAL maxError = -1;
+  // Iterates through element errors to get the maximum value
+  for (int64_t iel = 0; iel < nElems; iel++) {
         TPZCompEl *cel = cmesh->ElementVec()[iel];
         if (!cel) continue;
         if (cel->Dimension() != cmesh->Dimension()) continue;
@@ -321,7 +328,14 @@ void PerformAdapativePRefinement(TPZCompMesh *cmesh, TPZAnalysis &an,
             maxError = elementError;
         }
     }
-    std::cout<<"\tMax error found (in one element): "<<maxError<<std::endl;
+  std::cout<<"\tMax error found (in one element): "<<maxError<<std::endl;
+  return maxError;
+}
+void PerformAdapativePRefinement(TPZCompMesh *cmesh, TPZAnalysis &an,
+                                 const REAL maxError,
+                                 const REAL errorPercentage) {
+    std::cout<<"\tPerforming adaptive p-refinement..."<<std::endl;
+    const auto nElems = cmesh->NElements();
     // Refines elements which errors are bigger than 30% of the maximum error
     const REAL threshold = errorPercentage * maxError;
     int count = 0;
