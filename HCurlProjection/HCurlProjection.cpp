@@ -261,7 +261,8 @@ int main(int argc, char **argv)
             const REAL maxError = CalcMaxError(cMesh, an);
             if(postProcess){
                 std::cout<<"\t\tPost processing..."<<std::endl;
-                const std::string plotfile = "solution"+executionInfo+"_itH_"+std::to_string(itH)+"_itP_.vtk";//where to print the vtk files
+                const std::string plotfile = "solution"+executionInfo+
+                  "_itH_"+std::to_string(itH)+".vtk";//where to print the vtk files
                 an.DefineGraphMesh(dim, scalnames, vecnames, plotfile);
                 an.SetStep(itP);
                 an.PostProcess(postProcessResolution);
