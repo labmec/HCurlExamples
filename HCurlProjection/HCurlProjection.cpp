@@ -133,10 +133,19 @@ int main(int argc, char **argv)
     }
     const std::string executionInfo = [&](){
         std::string name("");
+        switch(exactSol)
+          {
+            case whichSol::EHarmonic3d:
+              name.append("har");
+              break;
+            case whichSol::EPoly3d:
+              name.append("pol");
+              break;
+          }
         if(adaptiveP) name.append("_adapP");
         else name.append("_unifP");
         name.append("_initialP");
-        name.append(std::to_string(initialPOrder));
+        name.append(std::to_string(initialPOrder));        
         name.append("_nPrefs");
         name.append(std::to_string(nPRefinements));
         name.append("_nDivs");
