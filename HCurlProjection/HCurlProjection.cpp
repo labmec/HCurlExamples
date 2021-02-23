@@ -105,8 +105,6 @@ int main(int argc, char **argv)
     constexpr int nPRefinements{0};
     //this will set how many rounds of h-refinements will be performed
     constexpr int nHRefinements{0};
-    //whether to calculate the errors
-    constexpr bool calcErrors = true;
     //whether to perform adaptive or uniform p-refinement
     constexpr bool adaptiveP = false;
     //once the element with the maximum error is found, elements with errors bigger than
@@ -127,10 +125,7 @@ int main(int argc, char **argv)
 
     //Setting up the analysis object
     constexpr bool optimizeBandwidth{false};
-    if(!calcErrors && adaptiveP){
-        std::cout<<"Either calculate the errors or choose uniform p-refinement. Aborting...\n";
-        return -1;
-    }
+
     const std::string executionInfo = [&](){
         std::string name("");
         switch(exactSol)
@@ -211,26 +206,25 @@ int main(int argc, char **argv)
         TPZStepSolver<STATE> step;
         step.SetDirect(ELDLt);
         an.SetSolver(step);
-        if(calcErrors){
-            //setting reference solution
-            switch(exactSol){
-                case EHarmonic3d:
-                  an.SetExact(HarmonicSolution3D);
-                    break;
-                case EPoly3d:
-                  an.SetExact(PolynomialSolution3D);
-                    break;
-                default:
-                    DebugStop();
-            }
-            an.SetThreadsForError(numthreads);
+        
+        //setting reference solution
+        switch(exactSol){
+        case EHarmonic3d:
+          an.SetExact(HarmonicSolution3D);
+          break;
+        case EPoly3d:
+          an.SetExact(PolynomialSolution3D);
+          break;
+        default:
+          DebugStop();
         }
+        an.SetThreadsForError(numthreads);
 
         //setting variables for post processing
         TPZStack<std::string> scalnames, vecnames;
         vecnames.Push("E");//print the state variable
         vecnames.Push("curlE");//print the curl of the state variable
-        if(calcErrors)  scalnames.Push("Error");//print the error of each element
+        scalnames.Push("Error");//print the error of each element
         scalnames.Push("MaterialId");//print the material identifier of each element
         //resize the matrix that will store the error for each element
         cMesh->ElementSolution().Resize(cMesh->NElements(),3);
@@ -258,12 +252,12 @@ int main(int argc, char **argv)
             an.LoadSolution();
 
             std::cout<<"\tSolving finished."<<std::endl;
-            if(calcErrors){
-                std::cout<<"\t\tCalculating errors..."<<std::endl;
-                TPZVec<REAL> errorVec(3,0);
-                an.PostProcessError(errorVec,true);
-                std::cout<<"############"<<std::endl;
-            }
+            
+            std::cout<<"\t\tCalculating errors..."<<std::endl;
+            TPZVec<REAL> errorVec(3,0);
+            an.PostProcessError(errorVec,true);
+            std::cout<<"############"<<std::endl;
+            
             const REAL maxError = CalcMaxError(cMesh, an);
             if(postProcess){
                 std::cout<<"\t\tPost processing..."<<std::endl;
