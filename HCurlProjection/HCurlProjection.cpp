@@ -98,11 +98,11 @@ int main(int argc, char **argv)
     //number of divisions of each direction (x, y or x,y,z) of the domain
     constexpr int nDiv{2};
     //exact solution
-    auto exactSol = whichSol::EHarmonic3d;
+    auto exactSol = whichSol::EPoly3d;
     //initial polynomial order
-    constexpr int initialPOrder{4};
+    constexpr int initialPOrder{1};
     //this will set how many rounds of p-refinements will be performed
-    constexpr int nPRefinements{0};
+    constexpr int nPRefinements{3};
     //this will set how many rounds of h-refinements will be performed
     constexpr int nHRefinements{0};
     //whether to perform adaptive or uniform p-refinement
@@ -119,7 +119,9 @@ int main(int argc, char **argv)
     //whether to generate .vtk files
     constexpr bool postProcess{true};
     //post-processing resolution
-    constexpr int postProcessResolution{initialPOrder};
+    constexpr int postProcessResolution{0};
+    //whether to export errors in csv format
+    constexpr bool exportErrors = true;
 
     constexpr MMeshType meshType{MMeshType::ETetrahedral};
 
@@ -148,6 +150,15 @@ int main(int argc, char **argv)
         return name;
     }();
 
+    std::ofstream errorFile;
+    const std::string errorFileName = "errors"+executionInfo+".csv";                  
+    if(exportErrors) {//create file and print header
+      errorFile.open(errorFileName);
+      std::stringstream errorLine;
+      errorLine << "itH" << "\t" << "itP" << "\t" << "max e u l2" << "\t";
+      errorLine << "e u hcurl" << "\t" << "e curl u l2" << "\t" << "e u l2" << std::endl;
+      errorFile << errorLine.str();        
+    }
     for(auto itH = 0 ; itH < nHRefinements + 1; itH++) {
         std::cout << "============================" << std::endl;
         std::cout << "\tIteration (h) " << itH + 1 << " out of " << nHRefinements + 1 << std::endl;
@@ -259,6 +270,12 @@ int main(int argc, char **argv)
             std::cout<<"############"<<std::endl;
             
             const REAL maxError = CalcMaxError(cMesh, an);
+            if(exportErrors){
+              std::stringstream errorLine;
+              errorLine << itH << "\t" << itP << "\t" << maxError << "\t";
+              errorLine << errorVec[0] << "\t" << errorVec[1] << "\t" << errorVec[2] << std::endl;
+              errorFile << errorLine.str();
+            }
             if(postProcess){
                 std::cout<<"\t\tPost processing..."<<std::endl;
                 const std::string plotfile = "solution"+executionInfo+
@@ -277,6 +294,8 @@ int main(int argc, char **argv)
         delete cMesh;
         delete gMesh;
     }
+
+    if(exportErrors){ errorFile.close(); }
     return 0;
 }
 
