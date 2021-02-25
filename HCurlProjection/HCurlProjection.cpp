@@ -156,7 +156,7 @@ int main(int argc, char **argv)
       errorFile.open(errorFileName);
       std::stringstream errorLine;
       errorLine << "itH" << "\t" << "itP" << "\t" << "max e u l2" << "\t";
-      errorLine << "e u hcurl" << "\t" << "e curl u l2" << "\t" << "e u l2" << std::endl;
+      errorLine << "e u hcurl" << "\t" << "e u l2" << "\t" << "e curl u l2" << std::endl;
       errorFile << errorLine.str();        
     }
     for(auto itH = 0 ; itH < nHRefinements + 1; itH++) {
