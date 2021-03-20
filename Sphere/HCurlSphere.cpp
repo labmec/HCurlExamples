@@ -97,5 +97,6 @@ TPZGeoMesh *SphereMesh(TPZVec<REAL> &center, REAL radius)
         std::ofstream out("SphereInCube.vtk");
         TPZVTKGeoMesh::PrintGMeshVTK(gmesh, out);
     }
+    return gmesh;
 }
 

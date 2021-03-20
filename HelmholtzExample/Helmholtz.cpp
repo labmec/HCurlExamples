@@ -17,7 +17,7 @@
 #include "Mesh/TPZCompMeshTools.h"
 #include "Post/TPZVTKGeoMesh.h"
 #include "Shape/pzshapelinear.h"//in order to adjust the polynomial family to be used
-#ifdef USING_MKL
+#ifdef PZ_USING_MKL
 #include "StrMatrix/TPZSSpStructMatrix.h"
 #else
 #include "StrMatrix/pzskylstrmatrix.h"
@@ -71,10 +71,6 @@ int main(int argc, char **argv)
     InitializePZLOG();
 #endif
     constexpr int numthreads{16};//number of threads to be used throughout the program
-#ifdef USING_MKL
-    mkl_set_dynamic(0); // disable automatic adjustment of the number of threads
-    mkl_set_num_threads(numthreads);
-#endif
     //physical dimension of the problem
     constexpr int dim{3};
     //number of divisions of each direction (x, y or x,y,z) of the domain
@@ -203,7 +199,7 @@ int main(int argc, char **argv)
 
             //I highly recommend running this program using the MKL libraries, the solving process will be
             //significantly faster.
-#ifdef USING_MKL
+#ifdef PZ_USING_MKL
             TPZSymetricSpStructMatrix matskl(cMesh);
 #else
             TPZSkylineStructMatrix matskl(cMesh);

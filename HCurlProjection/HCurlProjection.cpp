@@ -12,7 +12,7 @@
 #include "pzstepsolver.h"
 #include "pzshapelinear.h"//in order to adjust the polynomial family to be used
 #include "TPZCompMeshTools.h"
-#ifdef USING_MKL
+#ifdef PZ_USING_MKL
 #include "StrMatrix/TPZSSpStructMatrix.h"
 #else
 #include "StrMatrix/pzskylstrmatrix.h"
@@ -89,20 +89,16 @@ int main(int argc, char **argv)
     InitializePZLOG();
 #endif
     constexpr int numthreads{16};//number of threads to be used throughout the program
-#ifdef USING_MKL
-    mkl_set_dynamic(0); // disable automatic adjustment of the number of threads
-    mkl_set_num_threads(numthreads);
-#endif
     //physical dimension of the problem
     constexpr int dim{3};
     //number of divisions of each direction (x, y or x,y,z) of the domain
     constexpr int nDiv{2};
     //exact solution
-    auto exactSol = whichSol::EPoly3d;
+    auto exactSol = whichSol::EHarmonic3d;
     //initial polynomial order
-    constexpr int initialPOrder{1};
+    constexpr int initialPOrder{4};
     //this will set how many rounds of p-refinements will be performed
-    constexpr int nPRefinements{3};
+    constexpr int nPRefinements{0};
     //this will set how many rounds of h-refinements will be performed
     constexpr int nHRefinements{0};
     //whether to perform adaptive or uniform p-refinement
@@ -119,9 +115,9 @@ int main(int argc, char **argv)
     //whether to generate .vtk files
     constexpr bool postProcess{true};
     //post-processing resolution
-    constexpr int postProcessResolution{0};
+    constexpr int postProcessResolution{3};
     //whether to export errors in csv format
-    constexpr bool exportErrors = true;
+    constexpr bool exportErrors = false;
 
     constexpr MMeshType meshType{MMeshType::ETetrahedral};
 
@@ -204,7 +200,7 @@ int main(int argc, char **argv)
 
             //I highly recommend running this program using the MKL libraries, the solving process will be
             //significantly faster.
-#ifdef USING_MKL
+#ifdef PZ_USING_MKL
             TPZSymetricSpStructMatrix matskl(cMesh);
 #else
             TPZSkylineStructMatrix matskl(cMesh);
